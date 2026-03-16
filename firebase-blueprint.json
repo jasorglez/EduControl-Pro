@@ -1,0 +1,278 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "A student in the school",
+      "type": "object",
+      "properties": {
+        "controlNumber": { "type": "string", "description": "Unique control number for the student" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "birthDate": { "type": "string", "format": "date" },
+        "bloodType": { "type": "string" },
+        "emergencyContact": { "type": "string" },
+        "emergencyPhone": { "type": "string" },
+        "internetPassword": { "type": "string", "description": "Internet access password" },
+        "majorId": { "type": "string", "description": "Reference to Major id" },
+        "subjectIds": { "type": "array", "items": { "type": "string" }, "description": "List of assigned Subject ids" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["controlNumber", "firstName", "lastName", "status"]
+    },
+    "Major": {
+      "title": "Major",
+      "description": "A career or major offered by the school",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["code", "name"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "A teacher in the school",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string", "description": "Unique employee ID" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "specialty": { "type": "string" },
+        "availability": { 
+          "type": "object", 
+          "description": "Weekly availability map",
+          "properties": {
+            "monday": { "type": "array", "items": { "type": "string" } },
+            "tuesday": { "type": "array", "items": { "type": "string" } },
+            "wednesday": { "type": "array", "items": { "type": "string" } },
+            "thursday": { "type": "array", "items": { "type": "string" } },
+            "friday": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["employeeId", "firstName", "lastName", "status"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "A school subject or course",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "weeklyHours": { "type": "number", "description": "Total hours per week" },
+        "sessionDuration": { "type": "number", "description": "Duration of each session in minutes" },
+        "teacherId": { "type": "string", "description": "Reference to Teacher employeeId" },
+        "classroomId": { "type": "string", "description": "Reference to Classroom id" },
+        "schedule": { "type": "string" },
+        "days": { "type": "array", "items": { "type": "string" } },
+        "cost": { "type": "number", "description": "Cost of the subject" }
+      },
+      "required": ["code", "name"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "A financial payment made by a student",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Reference to Student id" },
+        "amount": { "type": "number" },
+        "concept": { "type": "string" },
+        "type": { "type": "string", "enum": ["subject", "semester", "other"] },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["paid", "pending", "cancelled"] },
+        "paymentMethod": { "type": "string", "enum": ["cash", "card", "transfer"] },
+        "reference": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "amount", "concept", "type", "status", "date"]
+    },
+    "AcademicGroup": {
+      "title": "Academic Group",
+      "description": "A cohort of students (e.g., 1A, 2B)",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "majorId": { "type": "string" },
+        "grade": { "type": "number" },
+        "studentIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "majorId", "grade"]
+    },
+    "ScheduleScenario": {
+      "title": "Schedule Scenario",
+      "description": "A generated scheduling scenario",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "active", "archived"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "status"]
+    },
+    "ScheduleEntry": {
+      "title": "Schedule Entry",
+      "description": "An individual slot in a schedule",
+      "type": "object",
+      "properties": {
+        "scenarioId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "classroomId": { "type": "string" },
+        "groupId": { "type": "string" },
+        "day": { "type": "string", "enum": ["monday", "tuesday", "wednesday", "thursday", "friday"] },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" }
+      },
+      "required": ["scenarioId", "teacherId", "subjectId", "classroomId", "groupId", "day", "startTime", "endTime"]
+    },
+    "Classroom": {
+      "title": "Classroom",
+      "description": "A school classroom or laboratory",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "building": { "type": "string" },
+        "floor": { "type": "string" },
+        "capacity": { "type": "number" },
+        "type": { "type": "string", "enum": ["classroom", "laboratory", "workshop", "other"] }
+      },
+      "required": ["name"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Entry and exit logs",
+      "type": "object",
+      "properties": {
+        "personId": { "type": "string", "description": "Control number or Employee ID" },
+        "personType": { "type": "string", "enum": ["student", "teacher"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["entry", "exit"] }
+      },
+      "required": ["personId", "personType", "timestamp", "type"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "A financial expense made by the school",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "category": { "type": "string", "enum": ["services", "supplies", "maintenance", "payroll", "other"] },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "card", "transfer"] },
+        "reference": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["amount", "category", "description", "date", "paymentMethod"]
+    },
+    "User": {
+      "title": "User",
+      "description": "System administrator user",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "SchoolConfig": {
+      "title": "School Configuration",
+      "description": "General school information and logos",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "logo": { "type": "string", "description": "Base64 encoded logo image" },
+        "semesterCost": { "type": "number", "description": "Base cost per semester" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
+    },
+    "Grade": {
+      "title": "Grade",
+      "description": "An academic grade for a student in a subject",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Reference to Student id" },
+        "subjectId": { "type": "string", "description": "Reference to Subject id" },
+        "semester": { "type": "number" },
+        "grade": { "type": "number" },
+        "status": { "type": "string", "enum": ["approved", "failed", "pending"] },
+        "period": { "type": "string", "description": "Academic period, e.g., Aug-Dec 2025" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "subjectId", "semester", "grade", "status", "period"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Collection of students"
+    },
+    "/teachers/{teacherId}": {
+      "schema": "Teacher",
+      "description": "Collection of teachers"
+    },
+    "/majors/{majorId}": {
+      "schema": "Major",
+      "description": "Collection of majors/careers"
+    },
+    "/subjects/{subjectId}": {
+      "schema": "Subject",
+      "description": "Collection of subjects"
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Collection of student payments"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Collection of school expenses"
+    },
+    "/classrooms/{classroomId}": {
+      "schema": "Classroom",
+      "description": "Collection of classrooms"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Log of entries and exits"
+    },
+    "/academic_groups/{groupId}": {
+      "schema": "AcademicGroup",
+      "description": "Collection of academic groups"
+    },
+    "/schedule_scenarios/{scenarioId}": {
+      "schema": "ScheduleScenario",
+      "description": "Collection of scheduling scenarios"
+    },
+    "/schedule_entries/{entryId}": {
+      "schema": "ScheduleEntry",
+      "description": "Collection of individual schedule slots"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "System users and roles"
+    },
+    "/school_config/{configId}": {
+      "schema": "SchoolConfig",
+      "description": "School settings and branding"
+    },
+    "/grades/{gradeId}": {
+      "schema": "Grade",
+      "description": "Academic grades for students"
+    }
+  }
+}

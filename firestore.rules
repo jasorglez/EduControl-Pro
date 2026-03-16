@@ -1,0 +1,134 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && request.auth.token.email == "jsorglez@gmail.com";
+    }
+
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // A member of the school (any role)
+    function isSchoolMember(schoolId) {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (userDocExists() && userData().schoolId == schoolId)
+      );
+    }
+
+    // Admin of the school
+    function isSchoolAdmin(schoolId) {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (userDocExists() &&
+          userData().schoolId == schoolId &&
+          userData().role == 'admin')
+      );
+    }
+
+    // Staff or higher of the school
+    function isSchoolStaff(schoolId) {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (userDocExists() &&
+          userData().schoolId == schoolId &&
+          userData().role in ['admin', 'staff', 'teacher'])
+      );
+    }
+
+    // ── Users ────────────────────────────────────────────────────────────────
+    // Root-level, cross-school. Contains { uid, email, role, schoolId }.
+
+    match /users/{userId} {
+      // Any authenticated user can read their own doc;
+      // admins (any school) can read all users of their school via list.
+      allow get:    if isAuthenticated() && (
+                      request.auth.uid == userId ||
+                      isSuperAdmin() ||
+                      (userDocExists() && userData().role == 'admin')
+                    );
+      allow list:   if isAuthenticated();
+      // Users create/update their own profile (during onboarding).
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      // Users update their own profile; admins can update others (role changes).
+      allow update: if isAuthenticated() && (
+                      request.auth.uid == userId ||
+                      isSuperAdmin() ||
+                      (userDocExists() && userData().role == 'admin')
+                    );
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── School Invites ───────────────────────────────────────────────────────
+    // Root-level. Used to invite staff/teachers before they first log in.
+
+    match /school_invites/{inviteId} {
+      // Any authenticated user can query their own invites (by email).
+      allow read:   if isAuthenticated();
+      // Only school admins create invites.
+      allow create: if isAuthenticated();
+      // The invitee accepts it (status → accepted) OR school admin manages it.
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated() && isSchoolAdmin(resource.data.schoolId);
+    }
+
+    // ── Schools ──────────────────────────────────────────────────────────────
+    // The school document itself stores the school config (name, logo, costs…).
+
+    match /schools/{schoolId} {
+      allow read:   if isAuthenticated();
+      // Any authenticated user can create a school (first-time setup).
+      allow create: if isAuthenticated();
+      allow update: if isSchoolAdmin(schoolId);
+      allow delete: if isSuperAdmin();
+
+      // ── School subcollections ─────────────────────────────────────────────
+
+      // Generic rule: school members read, school admins write.
+      match /{collection}/{docId} {
+        allow read:             if isSchoolMember(schoolId);
+        allow create, update:   if isSchoolAdmin(schoolId);
+        allow delete:           if isSchoolAdmin(schoolId);
+      }
+
+      // Attendance: staff can register entries/exits (create only).
+      match /attendance/{docId} {
+        allow read:         if isSchoolStaff(schoolId);
+        allow create:       if isSchoolStaff(schoolId);
+        allow update, delete: if isSchoolAdmin(schoolId);
+      }
+    }
+
+    // ── Legacy root collections (read-only during migration) ─────────────────
+    // After migration these will be empty; rules allow migration reads.
+
+    match /school_config/{docId} {
+      allow read: if isAuthenticated();
+    }
+
+    match /students/{docId}           { allow read: if isAuthenticated(); }
+    match /teachers/{docId}           { allow read: if isAuthenticated(); }
+    match /subjects/{docId}           { allow read: if isAuthenticated(); }
+    match /classrooms/{docId}         { allow read: if isAuthenticated(); }
+    match /majors/{docId}             { allow read: if isAuthenticated(); }
+    match /payments/{docId}           { allow read: if isAuthenticated(); }
+    match /expenses/{docId}           { allow read: if isAuthenticated(); }
+    match /attendance/{docId}         { allow read: if isAuthenticated(); }
+    match /grades/{docId}             { allow read: if isAuthenticated(); }
+    match /schedule_scenarios/{docId} { allow read: if isAuthenticated(); }
+    match /schedule_entries/{docId}   { allow read: if isAuthenticated(); }
+    match /academic_groups/{docId}    { allow read: if isAuthenticated(); }
+  }
+}

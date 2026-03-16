@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__getDiagnostics",
+      "Bash(cd:*)",
+      "Bash(node:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd /c \"taskkill /PID 59424 /F\")",
+      "Bash(cmd /c \"taskkill /PID 59424 /F && echo killed\" 2>&1)",
+      "Bash(cmd /c taskkill /PID 59424 /F)",
+      "Bash(powershell -Command \"Stop-Process -Id 59424 -Force; Write-Host 'done'\")",
+      "Bash(gh auth:*)",
+      "Bash(git config:*)"
+    ]
+  }
+}

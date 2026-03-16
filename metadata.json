@@ -1,0 +1,5 @@
+{
+  "name": "EduControl Pro",
+  "description": "Sistema integral de gestión escolar para control de alumnos, maestros, asistencias y materias con integración de Firebase.",
+  "requestFramePermissions": []
+}
