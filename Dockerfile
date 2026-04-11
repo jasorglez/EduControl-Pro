@@ -23,6 +23,6 @@ COPY --from=builder /app/dist ./dist
 COPY server.ts tsconfig.json ./
 
 ENV NODE_ENV=production
-EXPOSE 3000
+EXPOSE 80
 
 CMD ["npx", "tsx", "server.ts"]

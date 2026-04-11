@@ -4,7 +4,7 @@ services:
     container_name: educontrol-pro
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "8060:80"
     env_file:
       - .env
     environment:
