@@ -13,3 +13,4 @@ services:
     volumes:
       # Archivo sensible — NO está en git, se copia manualmente al servidor
       - ./firebase-service-account.json:/app/firebase-service-account.json:ro
+      - ./firebase-applet-config.json:/app/firebase-applet-config.json:ro
