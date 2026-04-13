@@ -9,6 +9,7 @@ services:
       - .env
     environment:
       - NODE_ENV=production
+      - PORT=80
     volumes:
       # Archivo sensible — NO está en git, se copia manualmente al servidor
       - ./firebase-service-account.json:/app/firebase-service-account.json:ro
