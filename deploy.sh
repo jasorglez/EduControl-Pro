@@ -14,5 +14,5 @@ docker compose up -d --build
 echo "🧹 Limpiando imágenes huérfanas..."
 docker image prune -f
 
-echo "✅ Deploy completado — EduControl Pro corriendo en puerto 3000"
+echo "✅ Deploy completado — EduControl Pro corriendo en puerto 8060"
 docker compose ps
