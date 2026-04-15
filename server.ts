@@ -498,8 +498,6 @@ async function startServer() {
       case '📋 Mis Tareas': {
         const tasksSnap = await school.collection('tasks')
           .where('teacherId', '==', session.profileId)
-          .where('status', '==', 'active')
-          .orderBy('createdAt', 'desc')
           .limit(10)
           .get();
         if (tasksSnap.empty) { bot.sendMessage(chatId, 'No tienes tareas creadas.'); break; }
@@ -584,7 +582,7 @@ async function startServer() {
       }
       case '💳 Mis Pagos': {
         // Payments use controlNumber as studentId (set by web app form)
-        const snap = await school.collection('payments').where('studentId','==',session.identifier).orderBy('date','desc').limit(10).get();
+        const snap = await school.collection('payments').where('studentId','==',session.identifier).limit(10).get();
         if (snap.empty) { bot.sendMessage(chatId, 'No tienes pagos registrados.'); break; }
         const list = snap.docs.map(d => { const p=d.data(); const date=(p.date?.toDate?.()??new Date()).toLocaleDateString('es-MX'); return `• $${p.amount} — ${p.concept} (${date})`; }).join('\n');
         bot.sendMessage(chatId, `💳 *Mis Pagos*\n\n${list}`, { parse_mode:'Markdown' });
@@ -641,7 +639,6 @@ async function startServer() {
         // Load all submissions for this student
         const subsSnap = await school.collection('task_submissions')
           .where('studentId', '==', session.profileId)
-          .orderBy('createdAt', 'desc')
           .limit(15)
           .get();
         if (subsSnap.empty) { bot.sendMessage(chatId, '📋 No tienes tareas asignadas por el momento.'); break; }
@@ -959,6 +956,7 @@ async function startServer() {
       bot.on('message', async (msg) => {
         const chatId  = msg.chat.id;
         const session = sessions.get(chatId);
+        try {
 
         // Allow file/photo messages only when waiting for a submission
         const isFileMsg = !!(msg.document || msg.photo || msg.video);
@@ -1029,6 +1027,12 @@ async function startServer() {
               case 'student': await handleStudentMenu(chatId, text, activeSession, bot!); break;
             }
             break;
+        }
+        } catch (err: any) {
+          console.error('[Bot] Error en handler:', err?.message ?? err);
+          try {
+            bot!.sendMessage(chatId, '⚠️ Ocurrió un error interno. Usa /menu para continuar.');
+          } catch { /* ignore */ }
         }
       });
 
