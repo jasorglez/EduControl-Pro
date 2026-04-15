@@ -19,7 +19,7 @@ const firebaseConfig = JSON.parse(
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // ─── Session types ─────────────────────────────────────────────────────────────
-type BotState = 'await_identifier' | 'await_password' | 'authenticated' | 'ai_mode' | 'await_attendance_id';
+type BotState = 'await_identifier' | 'await_password' | 'authenticated' | 'ai_mode' | 'await_attendance_id' | 'await_submission';
 type BotRole  = 'admin' | 'teacher' | 'staff' | 'student';
 
 interface BotSession {
@@ -30,7 +30,9 @@ interface BotSession {
   name?:       string;
   identifier?: string;
   attempts:    number;
-  attendanceType?: 'entry' | 'exit';
+  attendanceType?:        'entry' | 'exit';
+  pendingSubmissionId?:   string;  // task_submission doc id being submitted
+  pendingSubmissionTitle?: string; // task title for display
 }
 
 const sessions = new Map<number, BotSession>();
@@ -53,7 +55,7 @@ const KB = {
     keyboard: [
       ['📚 Mis Materias',   '👥 Mis Alumnos'  ],
       ['📝 Calificaciones', '✅ Asistencia'    ],
-      ['🔓 Cerrar Sesión'],
+      ['📋 Mis Tareas',     '🔓 Cerrar Sesión'],
     ],
     resize_keyboard: true,
   },
@@ -69,9 +71,10 @@ const KB = {
 
   student: {
     keyboard: [
-      ['📊 Mis Calificaciones', '💳 Mis Pagos'   ],
-      ['✅ Mi Asistencia',      '👤 Mi Perfil'   ],
-      ['👨‍🏫 Mis Maestros',       '🔓 Cerrar Sesión'],
+      ['📊 Mis Calificaciones', '💳 Mis Pagos'    ],
+      ['✅ Mi Asistencia',      '👤 Mi Perfil'    ],
+      ['📋 Mis Tareas',         '👨‍🏫 Mis Maestros' ],
+      ['🔓 Cerrar Sesión'],
     ],
     resize_keyboard: true,
   },
@@ -350,6 +353,12 @@ async function startServer() {
     if (correct) {
       session.state    = 'authenticated';
       session.attempts = 0;
+      // Store chatId on student doc so web app and notifications can find this user
+      if (session.role === 'student' && session.profileId) {
+        school.collection('students').doc(session.profileId)
+          .update({ telegramChatId: chatId })
+          .catch(() => {/* non-critical */});
+      }
       showMenu(chatId, session, bot);
     } else {
       session.attempts++;
@@ -486,6 +495,34 @@ async function startServer() {
         bot.sendMessage(chatId, `✅ *Asistencia Hoy*\n\nEntradas: ${d.alumnos_que_entraron}\nSin registro: ${d.alumnos_sin_registro}`, { parse_mode:'Markdown' });
         break;
       }
+      case '📋 Mis Tareas': {
+        const tasksSnap = await school.collection('tasks')
+          .where('teacherId', '==', session.profileId)
+          .where('status', '==', 'active')
+          .orderBy('createdAt', 'desc')
+          .limit(10)
+          .get();
+        if (tasksSnap.empty) { bot.sendMessage(chatId, 'No tienes tareas creadas.'); break; }
+        const taskIds = tasksSnap.docs.map(d => d.id);
+        const subsSnap = await school.collection('task_submissions')
+          .where('taskId', 'in', taskIds.slice(0, 10))
+          .get();
+        const countBySub = new Map<string, { pending: number; submitted: number; graded: number }>();
+        subsSnap.docs.forEach(d => {
+          const s = d.data();
+          const cur = countBySub.get(s.taskId) ?? { pending: 0, submitted: 0, graded: 0 };
+          cur[s.status as 'pending' | 'submitted' | 'graded']++;
+          countBySub.set(s.taskId, cur);
+        });
+        const lines = tasksSnap.docs.map((d, i) => {
+          const t   = d.data();
+          const cnt = countBySub.get(d.id) ?? { pending: 0, submitted: 0, graded: 0 };
+          const due = t.dueDate ? `📅 ${(t.dueDate.toDate?.() ?? new Date(t.dueDate)).toLocaleDateString('es-MX')}` : '';
+          return `*${i + 1}. ${t.title}*\n   ⏳ ${cnt.pending} pendientes · 📨 ${cnt.submitted} entregadas · ✅ ${cnt.graded} calificadas ${due}`;
+        }).join('\n\n');
+        bot.sendMessage(chatId, `📋 *Mis Tareas*\n\n${lines}\n\n_Revisa y califica desde la app web._`, { parse_mode: 'Markdown' });
+        break;
+      }
       case '🔓 Cerrar Sesión':
         sessions.delete(chatId);
         bot.sendMessage(chatId, '👋 Sesión cerrada.', { reply_markup: KB.remove as any });
@@ -600,12 +637,141 @@ async function startServer() {
         bot.sendMessage(chatId, `👨‍🏫 *Mis Maestros*\n\n${list}`, { parse_mode: 'Markdown' });
         break;
       }
+      case '📋 Mis Tareas': {
+        // Load all submissions for this student
+        const subsSnap = await school.collection('task_submissions')
+          .where('studentId', '==', session.profileId)
+          .orderBy('createdAt', 'desc')
+          .limit(15)
+          .get();
+        if (subsSnap.empty) { bot.sendMessage(chatId, '📋 No tienes tareas asignadas por el momento.'); break; }
+
+        // Load corresponding task docs for titles/attachments
+        const taskIds = [...new Set(subsSnap.docs.map(d => d.data().taskId))] as string[];
+        const tasksSnap = await school.collection('tasks')
+          .where(FieldPath.documentId(), 'in', taskIds.slice(0, 10))
+          .get();
+        const taskMap = new Map(tasksSnap.docs.map(d => [d.id, d.data()]));
+
+        // Find first pending submission so student can submit
+        const firstPending = subsSnap.docs.find(d => d.data().status === 'pending');
+
+        let msg = `📋 *Mis Tareas*\n\n`;
+        subsSnap.docs.forEach((d, i) => {
+          const sub  = d.data();
+          const task = taskMap.get(sub.taskId) as any;
+          const statusEmoji = sub.status === 'graded' ? '✅' : sub.status === 'submitted' ? '📨' : '⏳';
+          const due = task?.dueDate ? ` · 📅 ${(task.dueDate.toDate?.() ?? new Date(task.dueDate)).toLocaleDateString('es-MX')}` : '';
+          msg += `${statusEmoji} *${i + 1}. ${task?.title ?? sub.taskId}*${due}\n`;
+          if (sub.status === 'graded') {
+            msg += `   Calificación: *${sub.grade ?? '—'}*`;
+            if (sub.feedback) msg += ` · _${sub.feedback}_`;
+            msg += '\n';
+          }
+          // List downloadable attachments from the task
+          const attachments = (task?.attachments ?? []) as any[];
+          attachments.forEach((a: any) => { msg += `   📎 [${a.name}](${a.url})\n`; });
+          msg += '\n';
+        });
+
+        if (firstPending) {
+          const pendingTask = taskMap.get(firstPending.data().taskId) as any;
+          msg += `\n📤 *Entregar tarea:*\n"${pendingTask?.title ?? 'pendiente'}"\n\nEnvía un archivo o foto y lo registraré como tu entrega.`;
+          session.state                = 'await_submission';
+          session.pendingSubmissionId  = firstPending.id;
+          session.pendingSubmissionTitle = pendingTask?.title ?? 'Tarea';
+        }
+
+        bot.sendMessage(chatId, msg, {
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true,
+          reply_markup: firstPending
+            ? { keyboard: [['❌ Cancelar entrega']], resize_keyboard: true } as any
+            : KB.student as any,
+        });
+        break;
+      }
       case '🔓 Cerrar Sesión':
         sessions.delete(chatId);
         bot.sendMessage(chatId, '👋 Hasta luego.', { reply_markup: KB.remove as any });
         break;
       default:
         bot.sendMessage(chatId, 'Usa los botones del menú.');
+    }
+  };
+
+  // ── Task submission handler (student sends a file/photo) ──────────────────────
+  const handleSubmission = async (chatId: number, msg: TelegramBot.Message, session: BotSession, bot: TelegramBot) => {
+    if (!db) return;
+    const school = db.collection('schools').doc(session.schoolId);
+
+    // Cancel command
+    if (msg.text === '❌ Cancelar entrega') {
+      session.state               = 'authenticated';
+      session.pendingSubmissionId = undefined;
+      session.pendingSubmissionTitle = undefined;
+      bot.sendMessage(chatId, 'Entrega cancelada.', { reply_markup: KB.student as any });
+      return;
+    }
+
+    // Resolve file info from Telegram
+    let fileId: string | undefined;
+    let fileName = 'archivo';
+    let mimeType = 'application/octet-stream';
+
+    if (msg.document) {
+      fileId   = msg.document.file_id;
+      fileName = msg.document.file_name ?? 'documento';
+      mimeType = msg.document.mime_type ?? mimeType;
+    } else if (msg.photo) {
+      // photos arrive as array, last element is highest resolution
+      fileId   = msg.photo[msg.photo.length - 1].file_id;
+      fileName = `foto_${Date.now()}.jpg`;
+      mimeType = 'image/jpeg';
+    } else if (msg.video) {
+      fileId   = msg.video.file_id;
+      fileName = msg.video.file_name ?? `video_${Date.now()}.mp4`;
+      mimeType = msg.video.mime_type ?? 'video/mp4';
+    } else {
+      bot.sendMessage(chatId, '⚠️ Envía un archivo, foto o video para entregar la tarea.');
+      return;
+    }
+
+    try {
+      await bot.sendChatAction(chatId, 'upload_document');
+      const fileLink = await bot.getFileLink(fileId!);
+
+      // Build a lightweight attachment record (URL = Telegram CDN link)
+      const attachment = {
+        name:        fileName,
+        url:         fileLink,
+        storagePath: `telegram/${session.schoolId}/submissions/${session.pendingSubmissionId}/${fileName}`,
+        type:        mimeType.startsWith('image') ? 'image'
+                   : mimeType.startsWith('video') ? 'video'
+                   : fileName.endsWith('.pdf')    ? 'pdf'
+                   : fileName.match(/\.docx?$/)   ? 'word'
+                   : fileName.match(/\.xlsx?$/)   ? 'excel'
+                   : 'other',
+        size: msg.document?.file_size ?? 0,
+      };
+
+      await school.collection('task_submissions').doc(session.pendingSubmissionId!).update({
+        status:      'submitted',
+        submittedAt: FieldValue.serverTimestamp(),
+        attachments: FieldValue.arrayUnion(attachment),
+      });
+
+      session.state               = 'authenticated';
+      session.pendingSubmissionId = undefined;
+      session.pendingSubmissionTitle = undefined;
+
+      bot.sendMessage(
+        chatId,
+        `✅ *Tarea entregada*\n\n📎 ${fileName}\n\nTu maestro la recibirá y la calificará pronto.`,
+        { parse_mode: 'Markdown', reply_markup: KB.student as any }
+      );
+    } catch (e: any) {
+      bot.sendMessage(chatId, `⚠️ No se pudo registrar la entrega: ${e.message}`);
     }
   };
 
@@ -633,6 +799,55 @@ async function startServer() {
   };
 
   app.get('/api/health', (_req, res) => res.json({ status:'ok' }));
+
+  // POST /api/notify-task-assigned
+  // Body: { schoolId, studentIds: string[], taskTitle: string, teacherName: string, dueDate?: string }
+  app.post('/api/notify-task-assigned', async (req, res) => {
+    if (!bot || !db) { res.status(503).json({ error: 'Bot no disponible' }); return; }
+    const { schoolId, studentIds, taskTitle, teacherName, dueDate } = req.body as {
+      schoolId: string; studentIds: string[]; taskTitle: string; teacherName: string; dueDate?: string;
+    };
+    if (!schoolId || !studentIds?.length || !taskTitle) { res.status(400).json({ error: 'Faltan datos' }); return; }
+    const school = db.collection('schools').doc(schoolId);
+    let sent = 0;
+    await Promise.all(studentIds.map(async (studentId) => {
+      try {
+        const snap = await school.collection('students').doc(studentId).get();
+        const chatId = snap.data()?.telegramChatId as number | undefined;
+        if (!chatId) return;
+        const dueStr = dueDate ? `\n📅 Entrega: ${new Date(dueDate).toLocaleDateString('es-MX')}` : '';
+        await bot!.sendMessage(chatId,
+          `📋 *Nueva tarea asignada*\n\n*${taskTitle}*\n👨‍🏫 Maestro: ${teacherName}${dueStr}\n\nConsúltala en el bot con 📋 Mis Tareas.`,
+          { parse_mode: 'Markdown' }
+        );
+        sent++;
+      } catch { /* student not linked to Telegram — skip */ }
+    }));
+    res.json({ ok: true, sent });
+  });
+
+  // POST /api/notify-task-graded
+  // Body: { schoolId, studentId: string, taskTitle: string, grade: string, feedback?: string }
+  app.post('/api/notify-task-graded', async (req, res) => {
+    if (!bot || !db) { res.status(503).json({ error: 'Bot no disponible' }); return; }
+    const { schoolId, studentId, taskTitle, grade, feedback } = req.body as {
+      schoolId: string; studentId: string; taskTitle: string; grade: string; feedback?: string;
+    };
+    if (!schoolId || !studentId || !taskTitle || !grade) { res.status(400).json({ error: 'Faltan datos' }); return; }
+    try {
+      const snap = await db.collection('schools').doc(schoolId).collection('students').doc(studentId).get();
+      const chatId = snap.data()?.telegramChatId as number | undefined;
+      if (!chatId) { res.json({ ok: true, sent: 0, reason: 'Alumno sin Telegram vinculado' }); return; }
+      const feedbackStr = feedback ? `\n💬 _${feedback}_` : '';
+      await bot!.sendMessage(chatId,
+        `✅ *Tarea calificada*\n\n*${taskTitle}*\n\n⭐ Calificación: *${grade}*${feedbackStr}`,
+        { parse_mode: 'Markdown' }
+      );
+      res.json({ ok: true, sent: 1 });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   // ─── Telegram Bot ─────────────────────────────────────────────────────────────
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -742,17 +957,26 @@ async function startServer() {
 
       // ── Main message handler ───────────────────────────────────────────────────
       bot.on('message', async (msg) => {
+        const chatId  = msg.chat.id;
+        const session = sessions.get(chatId);
+
+        // Allow file/photo messages only when waiting for a submission
+        const isFileMsg = !!(msg.document || msg.photo || msg.video);
+        if (isFileMsg) {
+          if (session?.state === 'await_submission') {
+            await handleSubmission(chatId, msg, session, bot!);
+          }
+          return;
+        }
+
         if (!msg.text || msg.text.startsWith('/')) return;
-        const chatId = msg.chat.id;
-        const text   = msg.text.trim();
+        const text = msg.text.trim();
 
         const schoolId = await getLinkedSchool(chatId);
         if (!schoolId) {
           bot!.sendMessage(chatId, '⚠️ Vincula tu cuenta primero con /vincular <schoolId>');
           return;
         }
-
-        let session = sessions.get(chatId);
 
         // No session → prompt login
         if (!session) {
@@ -764,25 +988,29 @@ async function startServer() {
           return;
         }
 
-        session = sessions.get(chatId)!;
+        const activeSession = sessions.get(chatId)!;
 
-        switch (session.state) {
+        switch (activeSession.state) {
           case 'await_identifier':
-            await handleIdentifier(chatId, text, session, bot!);
+            await handleIdentifier(chatId, text, activeSession, bot!);
             break;
 
           case 'await_password':
-            await handlePassword(chatId, text, session, bot!);
+            await handlePassword(chatId, text, activeSession, bot!);
             break;
 
           case 'await_attendance_id':
-            await handleAttendanceId(chatId, text, session, bot!);
+            await handleAttendanceId(chatId, text, activeSession, bot!);
+            break;
+
+          case 'await_submission':
+            await handleSubmission(chatId, msg, activeSession, bot!);
             break;
 
           case 'ai_mode':
             if (text === '⬅️ Volver al Menú') {
-              session.state = 'authenticated';
-              showMenu(chatId, session, bot!);
+              activeSession.state = 'authenticated';
+              showMenu(chatId, activeSession, bot!);
               return;
             }
             await bot!.sendChatAction(chatId, 'typing');
@@ -794,11 +1022,11 @@ async function startServer() {
             break;
 
           case 'authenticated':
-            switch (session.role) {
-              case 'admin':   await handleAdminMenu(chatId, text, session, bot!);   break;
-              case 'teacher': await handleTeacherMenu(chatId, text, session, bot!); break;
-              case 'staff':   await handleStaffMenu(chatId, text, session, bot!);   break;
-              case 'student': await handleStudentMenu(chatId, text, session, bot!); break;
+            switch (activeSession.role) {
+              case 'admin':   await handleAdminMenu(chatId, text, activeSession, bot!);   break;
+              case 'teacher': await handleTeacherMenu(chatId, text, activeSession, bot!); break;
+              case 'staff':   await handleStaffMenu(chatId, text, activeSession, bot!);   break;
+              case 'student': await handleStudentMenu(chatId, text, activeSession, bot!); break;
             }
             break;
         }

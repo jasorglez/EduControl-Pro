@@ -16,6 +16,7 @@ import UsersPage        from './components/users/UsersPage';
 import SchoolSetupPage  from './components/school/SchoolSetupPage';
 import LoginPage        from './components/auth/LoginPage';
 import SchoolsPage      from './components/schools/SchoolsPage';
+import TasksPage        from './components/tasks/TasksPage';
 import { useState, useEffect, useMemo, Component } from 'react';
 import {
   Users,
@@ -64,7 +65,8 @@ import {
   PlayCircle,
   Sparkle,
   Building2,
-  Crown
+  Crown,
+  ClipboardList
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import pdfMake from 'pdfmake/build/pdfmake';
@@ -97,7 +99,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { Student, Teacher, Subject, Attendance, UserProfile, SchoolConfig, Classroom, Major, AcademicGroup, ScheduleScenario, ScheduleEntry, Payment, Expense, Grade, SchoolInvite } from './types';
+import { Student, Teacher, Subject, Attendance, UserProfile, SchoolConfig, Classroom, Major, AcademicGroup, ScheduleScenario, ScheduleEntry, Payment, Expense, Grade, SchoolInvite, Task, TaskAssignment, TaskSubmission } from './types';
 import { GoogleGenAI, Type } from "@google/genai";
 import {
   BarChart,
@@ -266,7 +268,7 @@ export default function App() {
   const [schoolId, setSchoolId] = useState<string | null>(null);
   const [needsSchoolSetup, setNeedsSchoolSetup] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'teachers' | 'subjects' | 'classrooms' | 'majors' | 'attendance' | 'search' | 'users' | 'settings' | 'scheduling' | 'payments' | 'expenses' | 'marketing' | 'schools'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'students' | 'teachers' | 'subjects' | 'classrooms' | 'majors' | 'attendance' | 'search' | 'users' | 'settings' | 'scheduling' | 'payments' | 'expenses' | 'marketing' | 'schools' | 'tasks'>('dashboard');
   const [studentSearch, setStudentSearch] = useState('');
   const [studentFilter, setStudentFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -287,6 +289,9 @@ export default function App() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskAssignments, setTaskAssignments] = useState<TaskAssignment[]>([]);
+  const [taskSubmissions, setTaskSubmissions] = useState<TaskSubmission[]>([]);
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [schoolConfig, setSchoolConfig] = useState<SchoolConfig | null>(null);
   const [isDataLoading, setIsDataLoading] = useState(true);
@@ -310,12 +315,15 @@ export default function App() {
   const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
   const [allSchools, setAllSchools] = useState<SchoolConfig[]>([]);
   const [pendingInvites, setPendingInvites] = useState<SchoolInvite[]>([]);
+  // null = ver la propia escuela; string = super admin viendo otra empresa
+  const [viewingSchoolId, setViewingSchoolId] = useState<string | null>(null);
 
   // ─── School-scoped Firestore helpers ────────────────────────────────────────
-  // Use these helpers everywhere data belongs to a school.
-  // Only call when schoolId is guaranteed non-null (user is logged in + has school).
-  const SC = (name: string) => collection(db, 'schools', schoolId!, name);
-  const SD = (col: string, id: string) => doc(db, 'schools', schoolId!, col, id);
+  // activeSchoolId: escuela actualmente en contexto (puede ser otra si el super
+  // admin cambió de empresa). Usar SIEMPRE estos helpers en lugar de schoolId directo.
+  const activeSchoolId = viewingSchoolId ?? schoolId;
+  const SC = (name: string) => collection(db, 'schools', activeSchoolId!, name);
+  const SD = (col: string, id: string) => doc(db, 'schools', activeSchoolId!, col, id);
 
   useEffect(() => {
     if (notification) {
@@ -995,34 +1003,46 @@ export default function App() {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'teachers'));
 
     const unsubSubjects = onSnapshot(SC('subjects'), (snapshot) => {
-      setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Subject)));
+      setSubjects(snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Subject))
+        .filter(s => s.status !== 'inactive'));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'subjects'));
 
     const unsubClassrooms = onSnapshot(SC('classrooms'), (snapshot) => {
-      setClassrooms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Classroom)));
+      setClassrooms(snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Classroom))
+        .filter(c => c.status !== 'inactive'));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'classrooms'));
 
     const unsubMajors = onSnapshot(SC('majors'), (snapshot) => {
-      setMajors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Major)));
+      setMajors(snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Major))
+        .filter(m => m.status !== 'inactive'));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'majors'));
 
     const unsubAcademicGroups = onSnapshot(SC('academic_groups'), (snapshot) => {
-      setAcademicGroups(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AcademicGroup)));
+      setAcademicGroups(snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as AcademicGroup))
+        .filter(g => g.status !== 'inactive'));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'academic_groups'));
 
     const unsubScheduleScenarios = onSnapshot(SC('schedule_scenarios'), (snapshot) => {
-      setScheduleScenarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ScheduleScenario)));
+      setScheduleScenarios(snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as ScheduleScenario))
+        .filter(s => s.status !== 'archived'));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'schedule_scenarios'));
 
     const unsubScheduleEntries = onSnapshot(SC('schedule_entries'), (snapshot) => {
-      setScheduleEntries(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ScheduleEntry)));
+      setScheduleEntries(snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as ScheduleEntry))
+        .filter(e => e.status !== 'inactive'));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'schedule_entries'));
 
     const unsubAttendance = onSnapshot(query(SC('attendance'), orderBy('timestamp', 'desc')), (snapshot) => {
       setAttendanceLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'attendance'));
 
-    const unsubUsers = onSnapshot(query(collection(db, 'users'), where('schoolId', '==', schoolId!)), (snapshot) => {
+    const unsubUsers = onSnapshot(query(collection(db, 'users'), where('schoolId', '==', activeSchoolId!)), (snapshot) => {
       setUsersList(snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'users'));
 
@@ -1031,14 +1051,36 @@ export default function App() {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'payments'));
 
     const unsubExpenses = onSnapshot(query(SC('expenses'), orderBy('date', 'desc')), (snapshot) => {
-      setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense)));
+      setExpenses(snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Expense))
+        .filter(e => e.status !== 'inactive'));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'expenses'));
 
     const unsubGrades = onSnapshot(SC('grades'), (snapshot) => {
       setGrades(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Grade)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'grades'));
 
-    const unsubSchool = onSnapshot(doc(db, 'schools', schoolId!), (snapshot) => {
+    // Tasks: admins/super-admin see all; teachers see only their own
+    const isSuperAdminUser = user.email === 'jsorglez@gmail.com';
+    const isAdminRole = userProfile.role === 'admin';
+    const tasksQuery = (isSuperAdminUser || isAdminRole)
+      ? query(SC('tasks'), orderBy('createdAt', 'desc'))
+      : query(SC('tasks'), where('teacherId', '==', user.uid), orderBy('createdAt', 'desc'));
+    const unsubTasks = onSnapshot(tasksQuery, (snapshot) => {
+      setTasks(snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() } as Task))
+        .filter(t => t.status !== 'inactive'));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'tasks'));
+
+    const unsubTaskAssignments = onSnapshot(SC('task_assignments'), (snapshot) => {
+      setTaskAssignments(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TaskAssignment)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'task_assignments'));
+
+    const unsubTaskSubmissions = onSnapshot(SC('task_submissions'), (snapshot) => {
+      setTaskSubmissions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TaskSubmission)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'task_submissions'));
+
+    const unsubSchool = onSnapshot(doc(db, 'schools', activeSchoolId!), (snapshot) => {
       if (snapshot.exists()) {
         setSchoolConfig({ id: snapshot.id, ...snapshot.data() } as SchoolConfig);
       }
@@ -1055,7 +1097,7 @@ export default function App() {
 
     // Pending invites for this school
     const unsubInvites = onSnapshot(
-      query(collection(db, 'school_invites'), where('schoolId', '==', schoolId!), where('status', '==', 'pending')),
+      query(collection(db, 'school_invites'), where('schoolId', '==', activeSchoolId!), where('status', '==', 'pending')),
       (snap) => {
         setPendingInvites(snap.docs.map(d => ({ id: d.id, ...d.data() } as SchoolInvite)));
       }
@@ -1075,11 +1117,14 @@ export default function App() {
       unsubPayments();
       unsubExpenses();
       unsubGrades();
+      unsubTasks();
+      unsubTaskAssignments();
+      unsubTaskSubmissions();
       unsubSchool();
       unsubAllSchools();
       unsubInvites();
     };
-  }, [user, userProfile, schoolId]);
+  }, [user, userProfile, schoolId, viewingSchoolId]);
 
   // --- Actions ---
   const handleGenerateRandomStudents = async () => {
@@ -1296,7 +1341,8 @@ export default function App() {
     const groupData = {
       ...data,
       grade: parseInt(data.grade as string, 10),
-      studentIds: [] // We can add logic to assign students later
+      studentIds: [],
+      status: (data.status as string) || 'active',
     };
     
     try {
@@ -1315,20 +1361,20 @@ export default function App() {
   const handleDeleteScenario = async (id: string) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Eliminar Escenario',
-      message: '¿Estás seguro de eliminar este escenario? Todos sus horarios asociados se borrarán.',
+      title: 'Archivar Escenario',
+      message: '¿Estás seguro? El escenario y sus horarios quedarán archivados (inactivos).',
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'schools', schoolId!, 'schedule_scenarios', id));
-          // Delete associated entries
-          const entriesToDelete = scheduleEntries.filter(e => e.scenarioId === id);
-          for (const entry of entriesToDelete) {
-            await deleteDoc(doc(db, 'schools', schoolId!, 'schedule_entries', entry.id!));
+          await updateDoc(SD('schedule_scenarios', id), { status: 'archived' });
+          // Marcar entradas asociadas como inactivas
+          const entriesToArchive = scheduleEntries.filter(e => e.scenarioId === id);
+          for (const entry of entriesToArchive) {
+            await updateDoc(SD('schedule_entries', entry.id!), { status: 'inactive' });
           }
           if (selectedScenarioId === id) setSelectedScenarioId(null);
-          setNotification({ message: 'Escenario eliminado con éxito.', type: 'success' });
+          setNotification({ message: 'Escenario archivado con éxito.', type: 'success' });
         } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, 'schedule_scenarios');
+          handleFirestoreError(error, OperationType.UPDATE, 'schedule_scenarios');
         }
         setConfirmDialog(null);
       }
@@ -1338,14 +1384,14 @@ export default function App() {
   const handleDeleteAcademicGroup = async (id: string) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Eliminar Grupo',
-      message: '¿Estás seguro de eliminar este grupo?',
+      title: 'Desactivar Grupo',
+      message: '¿Estás seguro? El grupo quedará inactivo.',
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'schools', schoolId!, 'academic_groups', id));
-          setNotification({ message: 'Grupo eliminado con éxito.', type: 'success' });
+          await updateDoc(SD('academic_groups', id), { status: 'inactive' });
+          setNotification({ message: 'Grupo desactivado con éxito.', type: 'success' });
         } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, 'academic_groups');
+          handleFirestoreError(error, OperationType.UPDATE, 'academic_groups');
         }
         setConfirmDialog(null);
       }
@@ -1385,12 +1431,13 @@ export default function App() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData.entries());
-    
+    const majorData = { ...data, status: (data.status as string) || 'active' };
+
     try {
       if (editingItem) {
-        await updateDoc(doc(db, 'schools', schoolId!, 'majors', editingItem.id), data);
+        await updateDoc(doc(db, 'schools', schoolId!, 'majors', editingItem.id), majorData);
       } else {
-        await addDoc(SC('majors'), data);
+        await addDoc(SC('majors'), majorData);
       }
       setIsModalOpen(false);
       setEditingItem(null);
@@ -1469,14 +1516,14 @@ export default function App() {
   const handleDeletePayment = async (id: string) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Eliminar Pago',
-      message: '¿Estás seguro de eliminar este registro de pago?',
+      title: 'Cancelar Pago',
+      message: '¿Estás seguro? El pago se marcará como cancelado.',
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'schools', schoolId!, 'payments', id));
-          setNotification({ message: 'Pago eliminado.', type: 'success' });
+          await updateDoc(SD('payments', id), { status: 'cancelled' });
+          setNotification({ message: 'Pago cancelado.', type: 'success' });
         } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, 'payments');
+          handleFirestoreError(error, OperationType.UPDATE, 'payments');
         }
         setConfirmDialog(null);
       }
@@ -1493,6 +1540,7 @@ export default function App() {
       amount: Number(data.amount),
       date: data.date ? Timestamp.fromDate(new Date((data.date as string) + 'T12:00:00')) : serverTimestamp(),
       createdAt: editingItem ? editingItem.createdAt : serverTimestamp(),
+      status: (data.status as string) || 'active',
     } as any;
 
     try {
@@ -1512,14 +1560,14 @@ export default function App() {
   const handleDeleteExpense = async (id: string) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Eliminar Egreso',
-      message: '¿Estás seguro de eliminar este registro de egreso?',
+      title: 'Desactivar Egreso',
+      message: '¿Estás seguro? El egreso quedará inactivo.',
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'schools', schoolId!, 'expenses', id));
-          setNotification({ message: 'Egreso eliminado.', type: 'success' });
+          await updateDoc(SD('expenses', id), { status: 'inactive' });
+          setNotification({ message: 'Egreso desactivado.', type: 'success' });
         } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, 'expenses');
+          handleFirestoreError(error, OperationType.UPDATE, 'expenses');
         }
         setConfirmDialog(null);
       }
@@ -1577,6 +1625,7 @@ export default function App() {
       sessionDuration: parseInt(data.sessionDuration as string, 10) || 60,
       cost: parseInt(data.cost as string, 10) || 0,
       days: days.length > 0 ? days : [],
+      status: (data.status as string) || 'active',
     };
     
     try {
@@ -1600,6 +1649,7 @@ export default function App() {
     const classroomData = {
       ...data,
       capacity: data.capacity ? parseInt(data.capacity as string, 10) : 0,
+      status: (data.status as string) || 'active',
     };
     
     try {
@@ -1618,14 +1668,14 @@ export default function App() {
   const handleDeleteClassroom = async (id: string) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Eliminar Salón',
-      message: '¿Estás seguro de eliminar este salón?',
+      title: 'Desactivar Salón',
+      message: '¿Estás seguro? El salón quedará inactivo.',
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'schools', schoolId!, 'classrooms', id));
-          setNotification({ message: 'Salón eliminado.', type: 'success' });
+          await updateDoc(SD('classrooms', id), { status: 'inactive' });
+          setNotification({ message: 'Salón desactivado.', type: 'success' });
         } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, 'classrooms');
+          handleFirestoreError(error, OperationType.UPDATE, 'classrooms');
         }
         setConfirmDialog(null);
       }
@@ -1716,17 +1766,132 @@ export default function App() {
   const handleDelete = async (collectionName: string, id: string) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Eliminar Registro',
-      message: '¿Estás seguro de eliminar este registro?',
+      title: 'Desactivar Registro',
+      message: '¿Estás seguro? El registro quedará inactivo (no se eliminará físicamente).',
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'schools', schoolId!, collectionName, id));
-          setNotification({ message: 'Registro eliminado con éxito.', type: 'success' });
+          await updateDoc(SD(collectionName, id), { status: 'inactive' });
+          setNotification({ message: 'Registro desactivado con éxito.', type: 'success' });
         } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, collectionName);
+          handleFirestoreError(error, OperationType.UPDATE, collectionName);
         }
         setConfirmDialog(null);
       }
+    });
+  };
+
+  // ─── Task handlers ──────────────────────────────────────────────────────────
+
+  const handleSaveTask = async (data: Omit<Task, 'id' | 'createdAt'>): Promise<string> => {
+    try {
+      const { _id, ...rest } = data as any;
+      if (_id) {
+        // Update existing task (e.g. adding/removing attachments)
+        await updateDoc(SD('tasks', _id), rest);
+        return _id as string;
+      }
+      const taskData = { ...rest, teacherId: userProfile!.uid, createdAt: serverTimestamp() };
+      const docRef = await addDoc(SC('tasks'), taskData);
+      setNotification({ message: 'Tarea guardada con éxito.', type: 'success' });
+      return docRef.id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'tasks');
+      throw error;
+    }
+  };
+
+  const handleAssignTask = async (taskId: string, studentIds: string[], groupId?: string): Promise<void> => {
+    try {
+      const batch = writeBatch(db);
+      if (groupId) {
+        // one assignment record for the group
+        const assignRef = doc(SC('task_assignments'));
+        batch.set(assignRef, {
+          taskId,
+          assignedBy: userProfile!.uid,
+          groupId,
+          assignedAt: serverTimestamp(),
+        });
+        // create a submission record per student in the group
+        for (const studentId of studentIds) {
+          const student = students.find(s => s.id === studentId);
+          if (!student) continue;
+          const subRef = doc(SC('task_submissions'));
+          batch.set(subRef, {
+            taskId,
+            studentId,
+            controlNumber: student.controlNumber,
+            studentName: `${student.firstName} ${student.lastName}`,
+            status: 'pending',
+            attachments: [],
+            createdAt: serverTimestamp(),
+          });
+        }
+      } else {
+        // individual assignments
+        for (const studentId of studentIds) {
+          const student = students.find(s => s.id === studentId);
+          if (!student) continue;
+          const assignRef = doc(SC('task_assignments'));
+          batch.set(assignRef, {
+            taskId,
+            assignedBy: userProfile!.uid,
+            studentId,
+            assignedAt: serverTimestamp(),
+          });
+          const subRef = doc(SC('task_submissions'));
+          batch.set(subRef, {
+            taskId,
+            studentId,
+            controlNumber: student.controlNumber,
+            studentName: `${student.firstName} ${student.lastName}`,
+            status: 'pending',
+            attachments: [],
+            createdAt: serverTimestamp(),
+          });
+        }
+      }
+      await batch.commit();
+      setNotification({ message: 'Tarea asignada con éxito.', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'task_assignments');
+      throw error;
+    }
+  };
+
+  const handleGradeSubmission = async (submissionId: string, grade: string, feedback: string): Promise<void> => {
+    try {
+      await updateDoc(SD('task_submissions', submissionId), {
+        grade,
+        feedback,
+        status: 'graded',
+        gradedAt: serverTimestamp(),
+        gradedBy: userProfile!.uid,
+      });
+      setNotification({ message: 'Tarea calificada con éxito.', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'task_submissions');
+      throw error;
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string): Promise<void> => {
+    return new Promise((resolve) => {
+      setConfirmDialog({
+        isOpen: true,
+        title: 'Desactivar Tarea',
+        message: '¿Estás seguro? La tarea quedará inactiva y no será visible.',
+        onConfirm: async () => {
+          try {
+            await updateDoc(SD('tasks', taskId), { status: 'inactive' });
+            setNotification({ message: 'Tarea desactivada con éxito.', type: 'success' });
+          } catch (error) {
+            handleFirestoreError(error, OperationType.UPDATE, 'tasks');
+          }
+          setConfirmDialog(null);
+          resolve();
+        }
+      });
     });
   };
 
@@ -2105,7 +2270,16 @@ export default function App() {
     }
   };
 
-  // ─── Create new school (called from SchoolSetupPage) ────────────────────────
+  // ─── Switch empresa context (solo super admin) ──────────────────────────────
+  // null = volver a la propia escuela; string = ver datos de otra empresa.
+  const handleSwitchSchool = (id: string | null) => {
+    setViewingSchoolId(id === schoolId ? null : id);
+  };
+
+  // ─── Create new school ──────────────────────────────────────────────────────
+  // Dos flujos:
+  //   1. Primer setup (userProfile.schoolId vacío): liga al usuario a la nueva escuela.
+  //   2. Super admin creando empresa adicional: crea la escuela sin cambiar su propio schoolId.
   const handleCreateSchool = async (data: { name: string; address?: string; phone?: string; email?: string; semesterCost?: number }) => {
     if (!user || !userProfile) return;
     try {
@@ -2113,13 +2287,19 @@ export default function App() {
         ...data, semesterCost: data.semesterCost ?? 0, createdAt: serverTimestamp(),
       });
       const newSchoolId = schoolRef.id;
-      const updatedProfile: UserProfile = { ...userProfile, schoolId: newSchoolId, role: 'admin' };
-      await setDoc(doc(db, 'users', user.uid), updatedProfile);
-      setUserProfile(updatedProfile);
-      await migrateExistingData(newSchoolId);
-      setSchoolId(newSchoolId);
-      setNeedsSchoolSetup(false);
-      setNotification({ message: '¡Escuela creada con éxito! Bienvenido a EduControl Pro.', type: 'success' });
+      if (!userProfile.schoolId) {
+        // Primer setup: ligar al usuario a esta escuela
+        const updatedProfile: UserProfile = { ...userProfile, schoolId: newSchoolId, role: 'admin' };
+        await setDoc(doc(db, 'users', user.uid), updatedProfile);
+        setUserProfile(updatedProfile);
+        await migrateExistingData(newSchoolId);
+        setSchoolId(newSchoolId);
+        setNeedsSchoolSetup(false);
+        setNotification({ message: '¡Escuela creada con éxito! Bienvenido a EduControl Pro.', type: 'success' });
+      } else {
+        // Super admin creando empresa adicional — no cambiar su propio schoolId
+        setNotification({ message: `Empresa "${data.name}" creada con éxito.`, type: 'success' });
+      }
     } catch (err) {
       console.error('Create school error:', err);
       setNotification({ message: 'Error al crear la escuela. Intenta de nuevo.', type: 'error' });
@@ -2193,6 +2373,7 @@ export default function App() {
             { tab: 'payments',   icon: CreditCard,      label: 'Pagos'         },
             { tab: 'expenses',   icon: Receipt,         label: 'Egresos'       },
             { tab: 'scheduling', icon: Cpu,             label: 'Programación'  },
+            { tab: 'tasks',      icon: ClipboardList,   label: 'Tareas'        },
             { tab: 'marketing',  icon: Video,           label: 'Marketing IA'  },
             ...(userProfile?.role === 'admin' || user?.email === 'jsorglez@gmail.com' ? [
               { tab: 'users',    icon: UserPlus,        label: 'Usuarios'      },
@@ -2295,6 +2476,26 @@ export default function App() {
 
       {/* ===== CONTENT AREA ===== */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+        {/* --- Banner: super admin viendo otra empresa --- */}
+        {viewingSchoolId && viewingSchoolId !== schoolId && (
+          <div className="shrink-0 bg-amber-500 text-white px-6 py-2.5 flex items-center justify-between gap-4 shadow-md z-40">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <span className="text-base">👁</span>
+              Viendo datos de:&nbsp;
+              <span className="font-bold">
+                {allSchools.find(s => s.id === viewingSchoolId)?.name ?? viewingSchoolId}
+              </span>
+              <span className="opacity-75 font-normal">— los cambios afectan esta empresa</span>
+            </div>
+            <button
+              onClick={() => handleSwitchSchool(null)}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold transition-colors"
+            >
+              ✕ Volver a mi empresa
+            </button>
+          </div>
+        )}
 
         {/* --- Main Content --- */}
         <main className="flex-1 p-4 md:p-8 overflow-auto">
@@ -2799,6 +3000,7 @@ export default function App() {
             <SchoolsPage
               schools={allSchools}
               currentSchoolId={schoolId!}
+              activeSchoolId={activeSchoolId!}
               userProfile={userProfile!}
               isSuperAdmin={user?.email === 'jsorglez@gmail.com'}
               pendingInvites={pendingInvites}
@@ -2808,11 +3010,31 @@ export default function App() {
               onInviteUser={handleInviteUser}
               onRevokeInvite={handleRevokeInvite}
               onUpdateRole={handleUpdateUserRole}
+              onSwitchSchool={handleSwitchSchool}
+            />
+          )}
+
+          {activeTab === 'tasks' && (
+            <TasksPage
+              tasks={tasks}
+              taskAssignments={taskAssignments}
+              taskSubmissions={taskSubmissions}
+              students={students.filter(s => s.status === 'active')}
+              teachers={teachers}
+              academicGroups={academicGroups}
+              subjects={subjects}
+              userProfile={userProfile!}
+              schoolId={activeSchoolId!}
+              isSuperAdmin={user?.email === 'jsorglez@gmail.com'}
+              onSaveTask={handleSaveTask}
+              onAssignTask={handleAssignTask}
+              onGrade={handleGradeSubmission}
+              onDeleteTask={handleDeleteTask}
             />
           )}
 
           {activeTab === 'settings' && (
-            <motion.div 
+            <motion.div
               key="settings"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}

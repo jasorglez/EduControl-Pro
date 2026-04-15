@@ -19,6 +19,8 @@ import { SchoolConfig, UserProfile, SchoolInvite } from '../../types';
 interface SchoolsPageProps {
   schools: SchoolConfig[];
   currentSchoolId: string;
+  /** Empresa cuyo contexto de datos está activo (puede ser otra si el super admin cambió). */
+  activeSchoolId: string;
   userProfile: UserProfile;
   isSuperAdmin: boolean;
   pendingInvites: SchoolInvite[];
@@ -28,6 +30,8 @@ interface SchoolsPageProps {
   onInviteUser: (email: string, role: 'admin' | 'staff' | 'teacher', schoolId: string) => Promise<void>;
   onRevokeInvite: (inviteId: string) => Promise<void>;
   onUpdateRole: (uid: string, role: 'admin' | 'staff' | 'teacher') => Promise<void>;
+  /** Super admin: cambia la empresa cuyo contexto de datos se visualiza. null = volver a la propia. */
+  onSwitchSchool: (id: string | null) => void;
 }
 
 const roleBadgeStyle: Record<string, string> = {
@@ -45,6 +49,7 @@ const roleLabel: Record<string, string> = {
 export default function SchoolsPage({
   schools,
   currentSchoolId,
+  activeSchoolId,
   userProfile,
   isSuperAdmin,
   pendingInvites,
@@ -54,6 +59,7 @@ export default function SchoolsPage({
   onInviteUser,
   onRevokeInvite,
   onUpdateRole,
+  onSwitchSchool,
 }: SchoolsPageProps) {
   const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -293,50 +299,87 @@ export default function SchoolsPage({
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {schools.map(school => (
-                <motion.div
-                  key={school.id}
-                  whileHover={{ y: -2 }}
-                  transition={{ duration: 0.15 }}
-                  className={`relative p-5 rounded-2xl border transition-all cursor-pointer ${
-                    selectedSchoolId === school.id
-                      ? 'border-indigo-300 bg-indigo-50/60 shadow-md shadow-indigo-100'
-                      : 'border-gray-100 bg-gray-50/50 hover:border-gray-200 hover:bg-white hover:shadow-sm'
-                  }`}
-                >
-                  {school.id === currentSchoolId && (
-                    <span className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 bg-indigo-600 text-white text-[10px] font-bold rounded-full">
-                      <Check className="w-2.5 h-2.5" />
-                      Tu escuela
-                    </span>
-                  )}
-                  <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center mb-3">
-                    <Building2 className="w-5 h-5 text-indigo-600" />
-                  </div>
-                  <h4 className="text-sm font-bold text-gray-900 leading-snug mb-1">{school.name}</h4>
-                  <p className="text-xs text-gray-400 truncate">{school.address || 'Sin dirección'}</p>
-
-                  {/* School ID — needed for Telegram /vincular */}
-                  <div className="mt-2 mb-4 flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1.5 group">
-                    <span className="text-[10px] font-mono text-gray-500 truncate flex-1 select-all">{school.id}</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(school.id!); }}
-                      title="Copiar ID"
-                      className="text-gray-400 hover:text-indigo-600 transition-colors shrink-0"
-                    >
-                      <Copy className="w-3 h-3" />
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => setSelectedSchoolId(school.id === selectedSchoolId ? null : school.id!)}
-                    className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+              {schools.map(school => {
+                const isOwn    = school.id === currentSchoolId;
+                const isActive = school.id === activeSchoolId;
+                return (
+                  <motion.div
+                    key={school.id}
+                    whileHover={{ y: -2 }}
+                    transition={{ duration: 0.15 }}
+                    className={`relative p-5 rounded-2xl border transition-all ${
+                      isActive
+                        ? 'border-amber-300 bg-amber-50/60 shadow-md shadow-amber-100'
+                        : selectedSchoolId === school.id
+                          ? 'border-indigo-300 bg-indigo-50/60 shadow-md shadow-indigo-100'
+                          : 'border-gray-100 bg-gray-50/50 hover:border-gray-200 hover:bg-white hover:shadow-sm'
+                    }`}
                   >
-                    {selectedSchoolId === school.id ? 'Ocultar' : 'Gestionar'}
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </motion.div>
-              ))}
+                    {/* Badges: activa (contexto) y propia */}
+                    <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
+                      {isActive && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">
+                          👁 Activa
+                        </span>
+                      )}
+                      {isOwn && !isActive && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 bg-indigo-600 text-white text-[10px] font-bold rounded-full">
+                          <Check className="w-2.5 h-2.5" />
+                          Tu escuela
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center mb-3">
+                      <Building2 className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <h4 className="text-sm font-bold text-gray-900 leading-snug mb-1">{school.name}</h4>
+                    <p className="text-xs text-gray-400 truncate">{school.address || 'Sin dirección'}</p>
+
+                    {/* School ID — needed for Telegram /vincular */}
+                    <div className="mt-2 mb-4 flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1.5 group">
+                      <span className="text-[10px] font-mono text-gray-500 truncate flex-1 select-all">{school.id}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(school.id!); }}
+                        title="Copiar ID"
+                        className="text-gray-400 hover:text-indigo-600 transition-colors shrink-0"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Gestionar usuarios de esta escuela */}
+                      <button
+                        onClick={() => setSelectedSchoolId(school.id === selectedSchoolId ? null : school.id!)}
+                        className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+                      >
+                        {selectedSchoolId === school.id ? 'Ocultar' : 'Gestionar'}
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Super admin: cambiar contexto de datos */}
+                      {isSuperAdmin && (
+                        isActive && !isOwn ? (
+                          <button
+                            onClick={() => onSwitchSchool(null)}
+                            className="flex items-center gap-1 text-xs font-semibold text-amber-600 hover:text-amber-800 transition-colors ml-auto"
+                          >
+                            ✕ Volver a la mía
+                          </button>
+                        ) : !isActive ? (
+                          <button
+                            onClick={() => onSwitchSchool(school.id!)}
+                            className="flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-800 transition-colors ml-auto"
+                          >
+                            Ver datos →
+                          </button>
+                        ) : null
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </div>

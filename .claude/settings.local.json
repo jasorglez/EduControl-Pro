@@ -11,7 +11,8 @@
       "Bash(cmd /c taskkill /PID 59424 /F)",
       "Bash(powershell -Command \"Stop-Process -Id 59424 -Force; Write-Host 'done'\")",
       "Bash(gh auth:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(curl:*)"
     ]
   }
 }
