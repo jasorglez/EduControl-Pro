@@ -185,7 +185,7 @@ async function processWithAI(userMessage: string, db: admin.firestore.Firestore,
 // ─── Server ────────────────────────────────────────────────────────────────────
 async function startServer() {
   const app  = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 8060;
   app.use(express.json());
 
   // ─── Email transporter ────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ async function startServer() {
     const roleLabel: Record<string, string> = {
       admin: 'Administrador', teacher: 'Maestro', staff: 'Personal',
     };
-    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    const appUrl = process.env.APP_URL || 'http://localhost:8060';
 
     try {
       await mailer.sendMail({

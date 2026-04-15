@@ -4,11 +4,13 @@ services:
     container_name: educontrol-pro
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "8060:80"
     env_file:
       - .env
     environment:
       - NODE_ENV=production
+      - PORT=80
     volumes:
       # Archivo sensible — NO está en git, se copia manualmente al servidor
       - ./firebase-service-account.json:/app/firebase-service-account.json:ro
+      - ./firebase-applet-config.json:/app/firebase-applet-config.json:ro
