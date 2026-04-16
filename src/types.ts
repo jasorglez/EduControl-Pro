@@ -1,8 +1,11 @@
+export type EducationLevel = 'kinder' | 'primaria' | 'secundaria' | 'preparatoria' | 'universidad';
+
 export interface Student {
   id?: string;
   controlNumber: string;
   firstName: string;
   lastName: string;
+  educationLevel?: EducationLevel;
   email?: string;
   phone?: string;
   address?: string;

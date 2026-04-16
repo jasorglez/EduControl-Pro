@@ -7,9 +7,10 @@ set -e
 echo "📦 Actualizando código..."
 git pull origin main
 
-echo "🐳 Rebuilding contenedor..."
+echo "🐳 Rebuilding contenedor (sin caché)..."
 docker compose down
-docker compose up -d --build
+docker compose build --no-cache
+docker compose up -d
 
 echo "🧹 Limpiando imágenes huérfanas..."
 docker image prune -f

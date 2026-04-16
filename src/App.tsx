@@ -3985,9 +3985,22 @@ export default function App() {
           >
             {activeTab === 'students' && (
               <form onSubmit={handleSaveStudent} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                {/* ── Bloque 1: Identificación (más usados) ── */}
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-500 uppercase">Número de Control</label>
                   <input name="controlNumber" defaultValue={editingItem?.controlNumber} required className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase">Nivel Educativo</label>
+                  <select name="educationLevel" defaultValue={editingItem?.educationLevel ?? ''} required className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors">
+                    <option value="">Seleccionar Nivel</option>
+                    <option value="kinder">Kinder</option>
+                    <option value="primaria">Primaria</option>
+                    <option value="secundaria">Secundaria</option>
+                    <option value="preparatoria">Preparatoria</option>
+                    <option value="universidad">Universidad</option>
+                  </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-500 uppercase">Nombre(s)</label>
@@ -3998,20 +4011,35 @@ export default function App() {
                   <input name="lastName" defaultValue={editingItem?.lastName} required className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
                 </div>
                 <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase">Grado</label>
+                  <input name="grade" type="number" min="1" max="12" defaultValue={editingItem?.grade} required className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase">Grupo</label>
+                  <input name="group" defaultValue={editingItem?.group} required className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase">Carrera / Programa</label>
+                  <select name="majorId" defaultValue={editingItem?.majorId} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors">
+                    <option value="">Seleccionar Carrera</option>
+                    {majors.map(major => (
+                      <option key={major.id} value={major.id}>{major.name} ({major.code})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase">Clave de Internet</label>
+                  <input name="internetPassword" defaultValue={editingItem?.internetPassword} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
+                </div>
+
+                {/* ── Bloque 2: Contacto ── */}
+                <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-500 uppercase">Correo</label>
                   <input name="email" type="email" defaultValue={editingItem?.email} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-500 uppercase">Teléfono</label>
                   <input name="phone" defaultValue={editingItem?.phone} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">Tipo de Sangre</label>
-                  <input name="bloodType" defaultValue={editingItem?.bloodType} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
-                </div>
-                <div className="col-span-full space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">Dirección</label>
-                  <input name="address" defaultValue={editingItem?.address} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-500 uppercase">Contacto Emergencia</label>
@@ -4021,38 +4049,29 @@ export default function App() {
                   <label className="text-xs font-bold text-gray-500 uppercase">Tel. Emergencia</label>
                   <input name="emergencyPhone" defaultValue={editingItem?.emergencyPhone} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">Clave de Internet</label>
-                  <input name="internetPassword" defaultValue={editingItem?.internetPassword} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
+
+                {/* ── Bloque 3: Datos adicionales ── */}
+                <div className="col-span-full space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase">Dirección</label>
+                  <input name="address" defaultValue={editingItem?.address} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">Grado</label>
-                  <input name="grade" type="number" min="1" max="12" defaultValue={editingItem?.grade} required className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
+                  <label className="text-xs font-bold text-gray-500 uppercase">Tipo de Sangre</label>
+                  <input name="bloodType" defaultValue={editingItem?.bloodType} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">Grupo</label>
-                  <input name="group" defaultValue={editingItem?.group} required className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">Carrera</label>
-                  <select name="majorId" defaultValue={editingItem?.majorId} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors">
-                    <option value="">Seleccionar Carrera</option>
-                    {majors.map(major => (
-                      <option key={major.id} value={major.id}>{major.name} ({major.code})</option>
-                    ))}
-                  </select>
-                </div>
+
+                {/* ── Bloque 4: Materias ── */}
                 <div className="col-span-full space-y-2">
                   <label className="text-xs font-bold text-gray-500 uppercase">Asignar Materias</label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-4 bg-gray-50 rounded-2xl border border-gray-100 max-h-48 overflow-y-auto">
                     {subjects.map(subject => (
                       <label key={subject.id} className="flex items-center gap-3 p-2 hover:bg-white rounded-xl transition-colors cursor-pointer group">
-                        <input 
-                          type="checkbox" 
-                          name="subjectIds" 
-                          value={subject.id} 
+                        <input
+                          type="checkbox"
+                          name="subjectIds"
+                          value={subject.id}
                           defaultChecked={editingItem?.subjectIds?.includes(subject.id)}
-                          className="w-5 h-5 rounded-lg border-gray-300 text-indigo-600 focus:ring-indigo-500" 
+                          className="w-5 h-5 rounded-lg border-gray-300 text-indigo-600 focus:ring-indigo-500"
                         />
                         <div className="flex flex-col">
                           <span className="text-sm font-bold text-gray-700 group-hover:text-indigo-600 transition-colors">{subject.name}</span>
@@ -4065,6 +4084,7 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
                 <button type="submit" className="col-span-full mt-4 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
                   Guardar Alumno
                 </button>
