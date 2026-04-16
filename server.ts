@@ -642,8 +642,10 @@ async function startServer() {
         break;
       }
       case '💳 Mis Pagos': {
-        // Payments use controlNumber as studentId (set by web app form)
-        const snap = await school.collection('payments').where('studentId','==',session.identifier).limit(10).get();
+        // Always use the canonical controlNumber from the student doc (not what the user typed)
+        const studentDoc = await school.collection('students').doc(session.profileId!).get();
+        const canonicalControl = studentDoc.data()?.controlNumber ?? session.identifier;
+        const snap = await school.collection('payments').where('studentId','==',canonicalControl).limit(10).get();
         if (snap.empty) { bot.sendMessage(chatId, 'No tienes pagos registrados.'); break; }
         const list = snap.docs.map(d => { const p=d.data(); const date=(p.date?.toDate?.()??new Date()).toLocaleDateString('es-MX'); return `• $${p.amount} — ${p.concept} (${date})`; }).join('\n');
         bot.sendMessage(chatId, `💳 *Mis Pagos*\n\n${list}`, { parse_mode:'Markdown' });

@@ -1500,7 +1500,14 @@ export default function App() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData.entries());
-    
+
+    // Validate studentId matches exactly a known controlNumber
+    const validControl = students.some(s => s.controlNumber === data.studentId);
+    if (!validControl) {
+      setNotification({ message: 'El alumno seleccionado no es válido. Recarga y vuelve a intentarlo.', type: 'error' });
+      return;
+    }
+
     const paymentData = {
       ...data,
       amount: Number(data.amount),
