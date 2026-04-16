@@ -1015,17 +1015,25 @@ async function startServer() {
         );
       });
 
+      // ── Per-chatId concurrency lock (prevents duplicate processing) ─────────────
+      const processingChats = new Set<number>();
+
       // ── Main message handler ───────────────────────────────────────────────────
       bot.on('message', async (msg) => {
-        const chatId  = msg.chat.id;
-        const session = sessions.get(chatId);
+        const chatId = msg.chat.id;
+
+        // Drop duplicate/concurrent updates for the same chat
+        if (processingChats.has(chatId)) return;
+        processingChats.add(chatId);
+
         try {
 
         // Allow file/photo messages only when waiting for a submission
         const isFileMsg = !!(msg.document || msg.photo || msg.video);
         if (isFileMsg) {
-          if (session?.state === 'await_submission') {
-            await handleSubmission(chatId, msg, session, bot!);
+          const s = sessions.get(chatId);
+          if (s?.state === 'await_submission') {
+            await handleSubmission(chatId, msg, s, bot!);
           }
           return;
         }
@@ -1038,6 +1046,9 @@ async function startServer() {
           bot!.sendMessage(chatId, '⚠️ Vincula tu cuenta primero con /vincular <schoolId>');
           return;
         }
+
+        // Read session AFTER the async Firestore call so we always get the freshest state
+        const session = sessions.get(chatId);
 
         // No session → prompt login
         if (!session) {
@@ -1100,6 +1111,8 @@ async function startServer() {
           try {
             bot!.sendMessage(chatId, '⚠️ Ocurrió un error interno. Usa /menu para continuar.');
           } catch { /* ignore */ }
+        } finally {
+          processingChats.delete(chatId);
         }
       });
 
