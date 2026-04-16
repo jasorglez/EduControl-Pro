@@ -315,6 +315,22 @@ export default function App() {
   const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
   const [allSchools, setAllSchools] = useState<SchoolConfig[]>([]);
   const [pendingInvites, setPendingInvites] = useState<SchoolInvite[]>([]);
+  const [settingsInviteEmail, setSettingsInviteEmail] = useState('');
+  const [settingsInviteRole, setSettingsInviteRole] = useState<'admin' | 'staff' | 'teacher'>('teacher');
+  const [isInvitingFromSettings, setIsInvitingFromSettings] = useState(false);
+
+  type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
+  type SlotEntry = { start: string; end: string; subjectId: string };
+  type WeekAvail = Record<DayKey, SlotEntry[]>;
+  const DAY_LABELS: { key: DayKey; label: string }[] = [
+    { key: 'monday',    label: 'Lunes'      },
+    { key: 'tuesday',   label: 'Martes'     },
+    { key: 'wednesday', label: 'Miércoles'  },
+    { key: 'thursday',  label: 'Jueves'     },
+    { key: 'friday',    label: 'Viernes'    },
+  ];
+  const emptyWeek = (): WeekAvail => ({ monday: [], tuesday: [], wednesday: [], thursday: [], friday: [] });
+  const [teacherAvail, setTeacherAvail] = useState<WeekAvail>(emptyWeek());
   // null = ver la propia escuela; string = super admin viendo otra empresa
   const [viewingSchoolId, setViewingSchoolId] = useState<string | null>(null);
 
@@ -1452,13 +1468,12 @@ export default function App() {
     const data = Object.fromEntries(formData.entries());
     const subjectIds = formData.getAll('subjectIds') as string[];
     
-    let availability = {};
-    try {
-      availability = JSON.parse(data.availability as string || '{"monday": ["07:00-14:00"], "tuesday": ["07:00-14:00"], "wednesday": ["07:00-14:00"], "thursday": ["07:00-14:00"], "friday": ["07:00-14:00"]}');
-    } catch (e) {
-      setNotification({ message: 'Formato de disponibilidad inválido. Debe ser JSON.', type: 'error' });
-      return;
-    }
+    // Build availability from visual state (slots per day)
+    const availability: Record<string, { start: string; end: string; subjectId: string }[]> = {};
+    (Object.keys(teacherAvail) as DayKey[]).forEach(day => {
+      const slots = teacherAvail[day];
+      if (slots.length > 0) availability[day] = slots;
+    });
 
     const teacherData = {
       ...data,
@@ -1578,9 +1593,8 @@ export default function App() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData.entries());
-    
     try {
-      await setDoc(doc(db, 'schools', schoolId!), {
+      await setDoc(doc(db, 'schools', activeSchoolId!), {
         ...data,
         semesterCost: parseInt(data.semesterCost as string, 10) || 0,
         updatedAt: serverTimestamp()
@@ -1593,22 +1607,36 @@ export default function App() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        try {
-          await setDoc(doc(db, 'schools', schoolId!), {
-            logo: base64String,
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-          setNotification({ message: 'Logo actualizado con éxito.', type: 'success' });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, 'school_config');
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = async () => {
+      URL.revokeObjectURL(objectUrl);
+      // Resize to max 512×512 to stay well under Firestore's 1MB doc limit
+      const MAX = 512;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const base64String = canvas.toDataURL('image/png', 0.85);
+      try {
+        await setDoc(doc(db, 'schools', activeSchoolId!), {
+          logo: base64String,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        setNotification({ message: 'Logo actualizado con éxito.', type: 'success' });
+      } catch (error) {
+        setNotification({ message: 'Error al guardar el logo. Intenta con una imagen más pequeña.', type: 'error' });
+        console.error('[Logo] Error:', error);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setNotification({ message: 'No se pudo leer la imagen.', type: 'error' });
+    };
+    img.src = objectUrl;
   };
 
   const handleSaveSubject = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -2030,6 +2058,31 @@ export default function App() {
   const handleUpdateUserRole = async (uid: string, newRole: 'admin' | 'staff' | 'teacher') => {
     try {
       await updateDoc(doc(db, 'users', uid), { role: newRole });
+
+      // Si el nuevo rol es maestro, verificar que exista en el catálogo de maestros.
+      // Si no existe, crear un registro mínimo para que aparezca en el catálogo.
+      if (newRole === 'teacher') {
+        const targetUser = usersList.find(u => u.uid === uid);
+        if (targetUser?.email) {
+          const existing = await getDocs(
+            query(SC('teachers'), where('email', '==', targetUser.email))
+          );
+          if (existing.empty) {
+            const namePart = targetUser.email.split('@')[0];
+            await addDoc(SC('teachers'), {
+              employeeId: uid.slice(0, 8).toUpperCase(),
+              firstName:  namePart,
+              lastName:   '',
+              email:      targetUser.email,
+              status:     'active',
+              subjectIds: [],
+              createdAt:  serverTimestamp(),
+            });
+            setNotification({ message: `Rol actualizado y maestro "${namePart}" agregado al catálogo.`, type: 'success' });
+            return;
+          }
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'users');
     }
@@ -2377,8 +2430,7 @@ export default function App() {
             { tab: 'marketing',  icon: Video,           label: 'Marketing IA'  },
             ...(userProfile?.role === 'admin' || user?.email === 'jsorglez@gmail.com' ? [
               { tab: 'users',    icon: UserPlus,        label: 'Usuarios'      },
-              { tab: 'settings', icon: Building2,       label: 'Escuela'       },
-              { tab: 'schools',  icon: Crown,           label: 'Escuelas'      },
+              { tab: 'settings', icon: Building2,       label: 'Admon Escuelas'},
             ] : []),
           ] as { tab: typeof activeTab; icon: any; label: string }[]).map(({ tab, icon: Icon, label }) => (
             <button
@@ -2933,8 +2985,29 @@ export default function App() {
               isDataLoading={isDataLoading}
               onLogAttendance={handleLogAttendance}
               onDelete={handleDelete}
-              onOpenNew={() => { setEditingItem(null); setIsModalOpen(true); }}
-              onOpenEdit={t => { setEditingItem(t); setIsModalOpen(true); }}
+              onOpenNew={() => {
+                setEditingItem(null);
+                setTeacherAvail(emptyWeek());
+                setIsModalOpen(true);
+              }}
+              onOpenEdit={t => {
+                setEditingItem(t);
+                const av = (t.availability ?? {}) as any;
+                const week = emptyWeek();
+                (Object.keys(week) as DayKey[]).forEach(day => {
+                  const raw = av[day] ?? [];
+                  week[day] = raw.map((s: any) => {
+                    // support both old string format "07:00-14:00" and new object format
+                    if (typeof s === 'string') {
+                      const [start, end] = s.split('-');
+                      return { start: start ?? '07:00', end: end ?? '14:00', subjectId: '' };
+                    }
+                    return { start: s.start ?? '07:00', end: s.end ?? '14:00', subjectId: s.subjectId ?? '' };
+                  });
+                });
+                setTeacherAvail(week);
+                setIsModalOpen(true);
+              }}
               onViewProfile={t => { setSelectedTeacher(t); setIsTeacherProfileOpen(true); }}
             />
           )}
@@ -3047,6 +3120,148 @@ export default function App() {
                   <p className="text-gray-500">Personaliza los datos y la imagen de tu institución.</p>
                 </div>
               </div>
+
+              {/* ── Usuarios de la escuela ── */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Usuarios de la Escuela</p>
+                  <span className="text-xs text-gray-400">{usersList.length} usuarios</span>
+                </div>
+
+                {/* Invite form */}
+                <div className="px-6 py-4 border-b border-gray-50">
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!settingsInviteEmail.trim()) return;
+                      setIsInvitingFromSettings(true);
+                      try {
+                        await handleInviteUser(settingsInviteEmail.trim(), settingsInviteRole, activeSchoolId!);
+                        setSettingsInviteEmail('');
+                      } finally { setIsInvitingFromSettings(false); }
+                    }}
+                    className="flex flex-col sm:flex-row gap-2"
+                  >
+                    <input
+                      type="email"
+                      required
+                      value={settingsInviteEmail}
+                      onChange={e => setSettingsInviteEmail(e.target.value)}
+                      placeholder="correo@ejemplo.com"
+                      className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                    <select
+                      value={settingsInviteRole}
+                      onChange={e => setSettingsInviteRole(e.target.value as 'admin' | 'staff' | 'teacher')}
+                      className="w-full sm:w-40 px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      <option value="teacher">Maestro</option>
+                      <option value="staff">Personal</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    <button
+                      type="submit"
+                      disabled={isInvitingFromSettings || !settingsInviteEmail.trim()}
+                      className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {isInvitingFromSettings
+                        ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        : <UserPlus className="w-4 h-4" />}
+                      Invitar
+                    </button>
+                  </form>
+                </div>
+
+                {/* Users list */}
+                <div className="divide-y divide-gray-50 px-6">
+                  {usersList.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-8">Sin usuarios registrados</p>
+                  ) : usersList.map(u => (
+                    <div key={u.uid} className="flex items-center gap-3 py-3">
+                      <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm shrink-0">
+                        {(u.email?.[0] ?? 'U').toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{u.email}</p>
+                        <p className="text-xs text-gray-400">{u.uid === userProfile!.uid ? 'Tú' : 'Usuario'}</p>
+                      </div>
+                      <select
+                        disabled={u.uid === userProfile!.uid}
+                        value={u.role}
+                        onChange={e => handleUpdateUserRole(u.uid, e.target.value as 'admin' | 'staff' | 'teacher')}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <option value="teacher">Maestro</option>
+                        <option value="staff">Personal</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Pending invites */}
+                {pendingInvites.length > 0 && (
+                  <div className="px-6 pb-4 pt-2 border-t border-gray-50">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Invitaciones pendientes</p>
+                    <div className="divide-y divide-gray-50">
+                      {pendingInvites.map(inv => (
+                        <div key={inv.id} className="flex items-center gap-3 py-2.5">
+                          <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
+                            <UserPlus className="w-4 h-4 text-amber-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{inv.email}</p>
+                          </div>
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Pendiente</span>
+                          <button
+                            onClick={() => handleRevokeInvite(inv.id!)}
+                            className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-red-400 hover:text-red-600"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Lista de escuelas ── */}
+              {allSchools.length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Mis Escuelas</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {allSchools.map(s => {
+                      const isCurrent = s.id === activeSchoolId;
+                      const isOwn     = s.id === schoolId;
+                      return (
+                        <div
+                          key={s.id}
+                          onClick={() => user?.email === 'jsorglez@gmail.com' && handleSwitchSchool(s.id!)}
+                          className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                            isCurrent
+                              ? 'border-indigo-300 bg-indigo-50'
+                              : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50 cursor-pointer'
+                          }`}
+                        >
+                          {s.logo
+                            ? <img src={s.logo} className="w-9 h-9 rounded-xl object-cover shrink-0" alt={s.name} />
+                            : <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0 text-indigo-600 font-black text-sm">{s.name?.[0]}</div>
+                          }
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-sm font-semibold truncate ${isCurrent ? 'text-indigo-700' : 'text-gray-800'}`}>{s.name}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {isCurrent && <span className="text-[10px] font-bold text-indigo-500 bg-indigo-100 px-1.5 py-0.5 rounded-full">📍 Estás aquí</span>}
+                              {isOwn    && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">Tu escuela</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-1 space-y-6">
@@ -3869,15 +4084,82 @@ export default function App() {
                   <label className="text-xs font-bold text-gray-500 uppercase">Correo</label>
                   <input name="email" type="email" defaultValue={editingItem?.email} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors" />
                 </div>
-                <div className="col-span-full space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase">Disponibilidad (JSON)</label>
-                  <textarea 
-                    name="availability" 
-                    defaultValue={JSON.stringify(editingItem?.availability || {"monday": ["07:00-14:00"], "tuesday": ["07:00-14:00"], "wednesday": ["07:00-14:00"], "thursday": ["07:00-14:00"], "friday": ["07:00-14:00"]}, null, 2)} 
-                    rows={5}
-                    className="w-full p-3 bg-gray-50 rounded-xl border border-gray-100 outline-none focus:border-indigo-600 transition-colors font-mono text-xs" 
-                  />
-                  <p className="text-[10px] text-gray-400">Formato: {"{ \"dia\": [\"HH:mm-HH:mm\"] }"}</p>
+                <div className="col-span-full space-y-3">
+                  <label className="text-xs font-bold text-gray-500 uppercase">Disponibilidad Semanal</label>
+                  <div className="space-y-3">
+                    {DAY_LABELS.map(({ key, label }) => (
+                      <div key={key} className="rounded-xl border border-gray-100 bg-gray-50/50 overflow-hidden">
+                        {/* Day header */}
+                        <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-100">
+                          <span className="text-sm font-bold text-gray-700">{label}</span>
+                          <button
+                            type="button"
+                            onClick={() => setTeacherAvail(prev => ({
+                              ...prev,
+                              [key]: [...prev[key], { start: '07:00', end: '08:00', subjectId: '' }]
+                            }))}
+                            className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+                          >
+                            <span className="text-base leading-none">＋</span> Agregar clase
+                          </button>
+                        </div>
+                        {/* Slots list */}
+                        {teacherAvail[key].length === 0 ? (
+                          <p className="text-xs text-gray-400 italic px-4 py-2">Sin clases asignadas</p>
+                        ) : (
+                          <div className="divide-y divide-gray-100">
+                            {teacherAvail[key].map((slot, idx) => (
+                              <div key={idx} className="flex items-center gap-2 px-4 py-2 flex-wrap">
+                                <input
+                                  type="time"
+                                  value={slot.start}
+                                  onChange={e => setTeacherAvail(prev => {
+                                    const updated = prev[key].map((s, i) => i === idx ? { ...s, start: e.target.value } : s);
+                                    return { ...prev, [key]: updated };
+                                  })}
+                                  className="p-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                />
+                                <span className="text-gray-400 text-xs font-medium">a</span>
+                                <input
+                                  type="time"
+                                  value={slot.end}
+                                  onChange={e => setTeacherAvail(prev => {
+                                    const updated = prev[key].map((s, i) => i === idx ? { ...s, end: e.target.value } : s);
+                                    return { ...prev, [key]: updated };
+                                  })}
+                                  className="p-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                />
+                                <select
+                                  value={slot.subjectId}
+                                  onChange={e => setTeacherAvail(prev => {
+                                    const updated = prev[key].map((s, i) => i === idx ? { ...s, subjectId: e.target.value } : s);
+                                    return { ...prev, [key]: updated };
+                                  })}
+                                  className="flex-1 min-w-[140px] p-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                >
+                                  <option value="">— Materia —</option>
+                                  {subjects.map(sub => (
+                                    <option key={sub.id} value={sub.id}>{sub.name}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => setTeacherAvail(prev => ({
+                                    ...prev,
+                                    [key]: prev[key].filter((_, i) => i !== idx)
+                                  }))}
+                                  className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Eliminar clase"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="col-span-full space-y-2">
                   <label className="text-xs font-bold text-gray-500 uppercase">Asignar Materias</label>

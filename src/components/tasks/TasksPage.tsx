@@ -178,22 +178,30 @@ export default function TasksPage({
     if (!title.trim()) return;
     setSaving(true);
     try {
-      // First save the task (without attachments) to get the ID
-      const taskId = await onSaveTask({
-        title: title.trim(),
+      // Resolve teacher display name from teachers list (matched by email)
+      const matchingTeacher = teachers.find(t => t.email === userProfile.email);
+      const teacherName = matchingTeacher
+        ? `${matchingTeacher.firstName} ${matchingTeacher.lastName}`
+        : (userProfile.email ?? userProfile.uid);
+
+      const basePayload = {
+        title:       title.trim(),
         description: description.trim() || undefined,
-        teacherId: userProfile.uid,
-        subjectId: subjectId || undefined,
-        dueDate: dueDate ? new Date(dueDate + 'T23:59:59') : undefined,
-        status: 'active',
-        attachments: [],
-      });
+        teacherId:   userProfile.uid,
+        teacherName,
+        subjectId:   subjectId || undefined,
+        dueDate:     dueDate ? new Date(dueDate + 'T23:59:59') : undefined,
+        status:      'active' as const,
+      };
+
+      // First save the task (without attachments) to get the ID
+      const taskId = await onSaveTask({ ...basePayload, attachments: [] });
+
       // Upload files if any
       if (pendingFiles.length > 0) {
         setUploading(true);
         const attachments = await uploadFiles(taskId, pendingFiles);
-        // Update task with attachments
-        await onSaveTask({ title: title.trim(), description: description.trim() || undefined, teacherId: userProfile.uid, subjectId: subjectId || undefined, dueDate: dueDate ? new Date(dueDate + 'T23:59:59') : undefined, status: 'active', attachments, _id: taskId } as any);
+        await onSaveTask({ ...basePayload, attachments, _id: taskId } as any);
         setUploading(false);
       }
       // Reset form

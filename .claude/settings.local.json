@@ -12,7 +12,9 @@
       "Bash(powershell -Command \"Stop-Process -Id 59424 -Force; Write-Host 'done'\")",
       "Bash(gh auth:*)",
       "Bash(git config:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "mcp__mssql-administration__list_databases",
+      "mcp__mssql-administration__execute_query"
     ]
   }
 }
