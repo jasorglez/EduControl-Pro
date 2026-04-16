@@ -1992,6 +1992,15 @@ export default function App() {
     });
   };
 
+  const handleUnassignStudent = async (submissionId: string): Promise<void> => {
+    try {
+      await deleteDoc(SD('task_submissions', submissionId));
+      setNotification({ message: 'Alumno removido de la tarea.', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'task_submissions');
+    }
+  };
+
   const handleSearch = () => {
     const student = students.find(s => s.controlNumber === searchQuery);
     setSearchResults(student || null);
@@ -3172,6 +3181,7 @@ export default function App() {
               onAssignTask={handleAssignTask}
               onGrade={handleGradeSubmission}
               onDeleteTask={handleDeleteTask}
+              onUnassignStudent={handleUnassignStudent}
             />
           )}
 

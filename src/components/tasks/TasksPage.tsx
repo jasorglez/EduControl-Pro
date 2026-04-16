@@ -65,10 +65,11 @@ interface TasksPageProps {
   userProfile:     UserProfile;
   schoolId:        string;
   isSuperAdmin:    boolean;
-  onSaveTask:      (data: Omit<Task, 'id' | 'createdAt'>) => Promise<string>; // returns new taskId
-  onAssignTask:    (taskId: string, studentIds: string[], groupId?: string) => Promise<void>;
-  onGrade:         (submissionId: string, grade: string, feedback: string) => Promise<void>;
-  onDeleteTask:    (taskId: string) => Promise<void>;
+  onSaveTask:        (data: Omit<Task, 'id' | 'createdAt'>) => Promise<string>;
+  onAssignTask:      (taskId: string, studentIds: string[], groupId?: string) => Promise<void>;
+  onGrade:           (submissionId: string, grade: string, feedback: string) => Promise<void>;
+  onDeleteTask:      (taskId: string) => Promise<void>;
+  onUnassignStudent: (submissionId: string) => Promise<void>;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -77,7 +78,7 @@ export default function TasksPage({
   tasks, taskAssignments, taskSubmissions,
   students, teachers, academicGroups, subjects,
   userProfile, schoolId, isSuperAdmin,
-  onSaveTask, onAssignTask, onGrade, onDeleteTask,
+  onSaveTask, onAssignTask, onGrade, onDeleteTask, onUnassignStudent,
 }: TasksPageProps) {
 
   // ── Panel state ─────────────────────────────────────────────────────────────
@@ -565,6 +566,11 @@ export default function TasksPage({
                               {sub.status !== 'pending' && (
                                 <button onClick={() => { setGradingId(isGrading ? null : sub.id!); setGradeVal(sub.grade ?? ''); setFeedbackVal(sub.feedback ?? ''); }} className="p-1 text-gray-400 hover:text-indigo-600 transition-colors" title="Calificar">
                                   <Star className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {sub.status === 'pending' && (
+                                <button onClick={() => onUnassignStudent(sub.id!)} className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="Quitar alumno">
+                                  <X className="w-3.5 h-3.5" />
                                 </button>
                               )}
                             </div>
