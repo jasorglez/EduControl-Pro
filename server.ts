@@ -19,8 +19,15 @@ const firebaseConfig = JSON.parse(
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // ─── Session types ─────────────────────────────────────────────────────────────
-type BotState = 'await_identifier' | 'await_password' | 'authenticated' | 'ai_mode' | 'await_attendance_id' | 'await_submission';
+type BotState = 'await_identifier' | 'await_school_selection' | 'await_password' | 'authenticated' | 'ai_mode' | 'await_attendance_id' | 'await_submission';
 type BotRole  = 'admin' | 'teacher' | 'staff' | 'student';
+
+interface SchoolCandidate {
+  schoolId:    string;
+  schoolName:  string;
+  profileId:   string;
+  studentName: string;
+}
 
 interface BotSession {
   state:       BotState;
@@ -33,6 +40,7 @@ interface BotSession {
   attendanceType?:        'entry' | 'exit';
   pendingSubmissionId?:   string;  // task_submission doc id being submitted
   pendingSubmissionTitle?: string; // task title for display
+  schoolCandidates?:      SchoolCandidate[]; // when student found in multiple schools
 }
 
 const sessions = new Map<number, BotSession>();
@@ -290,21 +298,74 @@ async function startServer() {
     bot.sendMessage(chatId, greet, { parse_mode:'Markdown', reply_markup: kb as any });
   };
 
+  // ── School selection step (when student found in multiple schools) ───────────
+  const handleSchoolSelection = async (chatId: number, text: string, session: BotSession, bot: TelegramBot) => {
+    const candidates = session.schoolCandidates ?? [];
+    const choice = candidates.find(c => c.schoolName === text);
+    if (!choice) {
+      const kb = { keyboard: candidates.map(c => [c.schoolName]), resize_keyboard: true, one_time_keyboard: true };
+      bot.sendMessage(chatId, '❓ Selecciona una escuela de la lista:', { reply_markup: kb as any });
+      return;
+    }
+    // Set session to the chosen school
+    session.schoolId        = choice.schoolId;
+    session.profileId       = choice.profileId;
+    session.name            = choice.studentName;
+    session.role            = 'student';
+    session.schoolCandidates = undefined;
+    session.state           = 'await_password';
+    bot.sendMessage(chatId, `🏫 *${choice.schoolName}*\n\n👤 Alumno: *${session.name}*\n\nEscribe tu contraseña de internet:`, { parse_mode:'Markdown', reply_markup: KB.remove as any });
+  };
+
   // ── Identifier step (email or control number) ────────────────────────────────
   const handleIdentifier = async (chatId: number, text: string, session: BotSession, bot: TelegramBot) => {
     if (!db) return;
-    const school = db.collection('schools').doc(session.schoolId);
 
-    // Check students first (by controlNumber)
-    const studentSnap = await school.collection('students').where('controlNumber','==',text.toUpperCase().trim()).get();
-    if (!studentSnap.empty) {
-      const s = studentSnap.docs[0].data();
-      session.identifier = text.toUpperCase().trim();
+    // Check students first (by controlNumber) — search across ALL schools
+    const controlNumber = text.toUpperCase().trim();
+    const schoolsSnap = await db.collection('schools').get();
+    const matches: SchoolCandidate[] = [];
+
+    await Promise.all(schoolsSnap.docs.map(async schoolDoc => {
+      const snap = await schoolDoc.ref.collection('students')
+        .where('controlNumber', '==', controlNumber)
+        .limit(1)
+        .get();
+      if (!snap.empty) {
+        const s = snap.docs[0].data();
+        matches.push({
+          schoolId:   schoolDoc.id,
+          schoolName: schoolDoc.data().name ?? schoolDoc.id,
+          profileId:  snap.docs[0].id,
+          studentName: `${s.firstName} ${s.lastName}`,
+        });
+      }
+    }));
+
+    if (matches.length === 1) {
+      // Single match — proceed normally
+      const m = matches[0];
+      session.identifier = controlNumber;
       session.role       = 'student';
-      session.profileId  = studentSnap.docs[0].id;
-      session.name       = `${s.firstName} ${s.lastName}`;
+      session.schoolId   = m.schoolId;
+      session.profileId  = m.profileId;
+      session.name       = m.studentName;
       session.state      = 'await_password';
       bot.sendMessage(chatId, `👤 Alumno encontrado: *${session.name}*\n\nEscribe tu contraseña de internet:`, { parse_mode:'Markdown', reply_markup: KB.remove as any });
+      return;
+    }
+
+    if (matches.length > 1) {
+      // Multiple schools — ask which one
+      session.identifier       = controlNumber;
+      session.schoolCandidates = matches;
+      session.state            = 'await_school_selection';
+      const kb = { keyboard: matches.map(c => [c.schoolName]), resize_keyboard: true, one_time_keyboard: true };
+      bot.sendMessage(
+        chatId,
+        `🏫 Tu número de control está registrado en *${matches.length} escuelas*.\n\nSelecciona a cuál vas a entrar:`,
+        { parse_mode: 'Markdown', reply_markup: kb as any }
+      );
       return;
     }
 
@@ -991,6 +1052,10 @@ async function startServer() {
         switch (activeSession.state) {
           case 'await_identifier':
             await handleIdentifier(chatId, text, activeSession, bot!);
+            break;
+
+          case 'await_school_selection':
+            await handleSchoolSelection(chatId, text, activeSession, bot!);
             break;
 
           case 'await_password':
