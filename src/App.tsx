@@ -1418,11 +1418,33 @@ export default function App() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const data = Object.fromEntries(formData.entries());
-    
+
+    const newControl = (data.controlNumber as string).trim();
+    const newEmail   = (data.email as string).trim().toLowerCase();
+    const editingId  = editingItem?.id;
+
+    // Duplicate control number check
+    const dupControl = students.find(s => s.controlNumber === newControl && s.id !== editingId);
+    if (dupControl) {
+      setNotification({ message: `El número de control "${newControl}" ya está registrado para ${dupControl.firstName} ${dupControl.lastName}.`, type: 'error' });
+      return;
+    }
+
+    // Duplicate email check (only if email provided)
+    if (newEmail) {
+      const dupEmail = students.find(s => (s.email ?? '').toLowerCase() === newEmail && s.id !== editingId);
+      if (dupEmail) {
+        setNotification({ message: `El correo "${newEmail}" ya está registrado para ${dupEmail.firstName} ${dupEmail.lastName}.`, type: 'error' });
+        return;
+      }
+    }
+
     const subjectIds = formData.getAll('subjectIds') as string[];
-    
+
     const studentData = {
       ...data,
+      controlNumber: newControl,
+      email: newEmail || undefined,
       grade: data.grade ? parseInt(data.grade as string, 10) : 0,
       group: data.group || '',
       subjectIds: subjectIds,
