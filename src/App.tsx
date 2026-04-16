@@ -1454,7 +1454,47 @@ export default function App() {
 
     try {
       if (editingItem) {
-        await updateDoc(doc(db, 'schools', schoolId!, 'students', editingItem.id), studentData);
+        await updateDoc(doc(db, 'schools', activeSchoolId!, 'students', editingItem.id), studentData);
+
+        // Cascade update if controlNumber changed
+        const oldControl = editingItem.controlNumber;
+        if (oldControl && oldControl !== newControl) {
+
+          // 1. Payments: studentId = old control
+          const paymentsSnap = await getDocs(
+            query(collection(db, 'schools', activeSchoolId!, 'payments'),
+              where('studentId', '==', oldControl))
+          );
+          await Promise.all(paymentsSnap.docs.map(d =>
+            updateDoc(d.ref, { studentId: newControl })
+          ));
+
+          // 2. Attendance: personId = old control
+          const attendanceSnap = await getDocs(
+            query(collection(db, 'schools', activeSchoolId!, 'attendance'),
+              where('personId', '==', oldControl))
+          );
+          await Promise.all(attendanceSnap.docs.map(d =>
+            updateDoc(d.ref, { personId: newControl })
+          ));
+
+          // 3. Task submissions: controlNumber field
+          const subsSnap = await getDocs(
+            query(collection(db, 'schools', activeSchoolId!, 'task_submissions'),
+              where('controlNumber', '==', oldControl))
+          );
+          await Promise.all(subsSnap.docs.map(d =>
+            updateDoc(d.ref, { controlNumber: newControl })
+          ));
+
+          const updated = paymentsSnap.size + attendanceSnap.size + subsSnap.size;
+          if (updated > 0) {
+            setNotification({ message: `Alumno actualizado. Se actualizaron ${updated} registros relacionados (pagos, asistencias, tareas).`, type: 'success' });
+            setIsModalOpen(false);
+            setEditingItem(null);
+            return;
+          }
+        }
       } else {
         await addDoc(SC('students'), studentData);
       }

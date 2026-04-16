@@ -635,9 +635,10 @@ async function startServer() {
 
     switch (text) {
       case '📊 Mis Calificaciones': {
-        const snap = await school.collection('grades').where('studentId','==',session.profileId).orderBy('semester').get();
+        const snap = await school.collection('grades').where('studentId','==',session.profileId).get();
         if (snap.empty) { bot.sendMessage(chatId, 'No tienes calificaciones registradas.'); break; }
-        const list = snap.docs.map(d => { const g=d.data(); return `${g.semester}°sem — Cal: ${g.grade} ${g.status==='approved'?'✅':'❌'}`; }).join('\n');
+        const sorted = snap.docs.sort((a,b) => (a.data().semester??0) - (b.data().semester??0));
+        const list = sorted.map(d => { const g=d.data(); return `${g.semester}°sem — Cal: ${g.grade} ${g.status==='approved'?'✅':'❌'}`; }).join('\n');
         bot.sendMessage(chatId, `📊 *Mis Calificaciones*\n\n${list}`, { parse_mode:'Markdown' });
         break;
       }
@@ -652,10 +653,12 @@ async function startServer() {
         break;
       }
       case '✅ Mi Asistencia': {
-        // Attendance uses controlNumber as personId (set by web app)
-        const snap = await school.collection('attendance').where('personId','==',session.identifier).orderBy('timestamp','desc').limit(10).get();
+        const snap = await school.collection('attendance').where('personId','==',session.identifier).limit(20).get();
         if (snap.empty) { bot.sendMessage(chatId, 'No tienes registros de asistencia.'); break; }
-        const list = snap.docs.map(d => { const a=d.data(); const ts=(a.timestamp?.toDate?.()??new Date()); return `• ${a.type==='entry'?'Entrada':'Salida'} — ${ts.toLocaleDateString('es-MX')} ${ts.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}`; }).join('\n');
+        const sorted = snap.docs
+          .sort((a,b) => (b.data().timestamp?.toMillis?.()??0) - (a.data().timestamp?.toMillis?.()??0))
+          .slice(0, 10);
+        const list = sorted.map(d => { const a=d.data(); const ts=(a.timestamp?.toDate?.()??new Date()); return `• ${a.type==='entry'?'Entrada':'Salida'} — ${ts.toLocaleDateString('es-MX')} ${ts.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}`; }).join('\n');
         bot.sendMessage(chatId, `✅ *Mi Asistencia*\n\n${list}`, { parse_mode:'Markdown' });
         break;
       }
