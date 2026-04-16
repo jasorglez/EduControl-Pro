@@ -916,7 +916,9 @@ async function startServer() {
   if (token) {
     try {
       bot = new TelegramBot(token, {
-        polling: { interval: 1000, autoStart: true, params: { timeout: 30 } },
+        // interval: 0 → poll immediately after previous response (no overlap)
+        // timeout: 10 → long-poll up to 10s then return; avoids duplicate delivery
+        polling: { interval: 0, autoStart: true, params: { timeout: 10 } },
       });
       bot.on('polling_error', (err: any) => {
         const msg = err.message ?? '';
@@ -1015,14 +1017,23 @@ async function startServer() {
         );
       });
 
-      // ── Per-chatId concurrency lock (prevents duplicate processing) ─────────────
-      const processingChats = new Set<number>();
+      // ── Dedup + concurrency guards ────────────────────────────────────────────
+      const seenMessageIds  = new Set<number>(); // global dedup by Telegram message_id
+      const processingChats = new Set<number>(); // per-chat concurrency lock
 
       // ── Main message handler ───────────────────────────────────────────────────
       bot.on('message', async (msg) => {
         const chatId = msg.chat.id;
 
-        // Drop duplicate/concurrent updates for the same chat
+        // 1) Skip if this exact message was already processed (polling overlap dedup)
+        if (seenMessageIds.has(msg.message_id)) return;
+        seenMessageIds.add(msg.message_id);
+        if (seenMessageIds.size > 2000) {
+          const [oldest] = seenMessageIds;
+          seenMessageIds.delete(oldest);
+        }
+
+        // 2) Drop concurrent updates for the same chat
         if (processingChats.has(chatId)) return;
         processingChats.add(chatId);
 
