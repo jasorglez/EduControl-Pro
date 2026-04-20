@@ -66,7 +66,8 @@ import {
   Sparkle,
   Building2,
   Crown,
-  ClipboardList
+  ClipboardList,
+  Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import pdfMake from 'pdfmake/build/pdfmake';
@@ -1994,7 +1995,23 @@ export default function App() {
 
   const handleUnassignStudent = async (submissionId: string): Promise<void> => {
     try {
-      await deleteDoc(SD('task_submissions', submissionId));
+      // Find the submission to get taskId + studentId
+      const sub = taskSubmissions.find(s => s.id === submissionId);
+
+      const batch = writeBatch(db);
+      batch.delete(SD('task_submissions', submissionId));
+
+      // Also delete the individual task_assignment for this student so they can be re-assigned
+      if (sub) {
+        const assignment = taskAssignments.find(
+          a => a.taskId === sub.taskId && a.studentId === sub.studentId
+        );
+        if (assignment?.id) {
+          batch.delete(SD('task_assignments', assignment.id));
+        }
+      }
+
+      await batch.commit();
       setNotification({ message: 'Alumno removido de la tarea.', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'task_submissions');
@@ -3330,9 +3347,21 @@ export default function App() {
                           }
                           <div className="min-w-0 flex-1">
                             <p className={`text-sm font-semibold truncate ${isCurrent ? 'text-indigo-700' : 'text-gray-800'}`}>{s.name}</p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
+                            <div className="flex items-center gap-1.5 mt-0.5 mb-1.5">
                               {isCurrent && <span className="text-[10px] font-bold text-indigo-500 bg-indigo-100 px-1.5 py-0.5 rounded-full">📍 Estás aquí</span>}
                               {isOwn    && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">Tu escuela</span>}
+                            </div>
+                            {/* ID para bot de Telegram */}
+                            <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 rounded-lg px-2 py-1">
+                              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wide shrink-0">ID:</span>
+                              <span className="text-[10px] font-mono font-semibold text-indigo-700 break-all flex-1 select-all">{s.id}</span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(s.id!); }}
+                                title="Copiar ID"
+                                className="shrink-0 p-0.5 rounded text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100 transition-colors"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
                             </div>
                           </div>
                         </div>

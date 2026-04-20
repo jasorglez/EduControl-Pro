@@ -504,7 +504,7 @@ export default function TasksPage({
                         <input value={studentSearch} onChange={e => setStudSearch(e.target.value)} placeholder="Buscar alumno..." className="w-full px-3 py-1.5 border border-indigo-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" />
                         <div className="max-h-36 overflow-y-auto space-y-1">
                           {filteredStudents.slice(0, 30).map(s => {
-                            const alreadyAssigned = taskAssigns.some(a => a.studentId === s.id);
+                            const alreadyAssigned = taskSubs.some(sub => sub.studentId === s.id);
                             const checked = selectedStudentIds.has(s.id!);
                             return (
                               <label key={s.id} className={`flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer hover:bg-white transition-colors text-xs ${alreadyAssigned ? 'opacity-40' : ''}`}>

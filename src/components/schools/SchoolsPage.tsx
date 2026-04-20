@@ -337,15 +337,18 @@ export default function SchoolsPage({
                     <p className="text-xs text-gray-400 truncate">{school.address || 'Sin dirección'}</p>
 
                     {/* School ID — needed for Telegram /vincular */}
-                    <div className="mt-2 mb-4 flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1.5 group">
-                      <span className="text-[10px] font-mono text-gray-500 truncate flex-1 select-all">{school.id}</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(school.id!); }}
-                        title="Copiar ID"
-                        className="text-gray-400 hover:text-indigo-600 transition-colors shrink-0"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </button>
+                    <div className="mt-3 mb-4 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2">
+                      <p className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wider mb-1">ID Escuela (Telegram)</p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono font-bold text-indigo-700 break-all flex-1 select-all">{school.id}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(school.id!); }}
+                          title="Copiar ID"
+                          className="shrink-0 p-1 rounded-md text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100 transition-colors"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
