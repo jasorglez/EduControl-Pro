@@ -32,6 +32,10 @@ interface SchoolsPageProps {
   onUpdateRole: (uid: string, role: 'admin' | 'staff' | 'teacher') => Promise<void>;
   /** Super admin: cambia la empresa cuyo contexto de datos se visualiza. null = volver a la propia. */
   onSwitchSchool: (id: string | null) => void;
+  /** Super admin: elimina una escuela con todos sus datos. */
+  onDeleteSchool: (schoolId: string) => Promise<void>;
+  /** Super admin: mueve un usuario a otra escuela por email. Devuelve error string o null. */
+  onMoveUser: (email: string, targetSchoolId: string) => Promise<string | null>;
 }
 
 const roleBadgeStyle: Record<string, string> = {
@@ -60,10 +64,20 @@ export default function SchoolsPage({
   onRevokeInvite,
   onUpdateRole,
   onSwitchSchool,
+  onDeleteSchool,
+  onMoveUser,
 }: SchoolsPageProps) {
   const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showInviteForm, setShowInviteForm] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [moveEmail, setMoveEmail] = useState('');
+  const [moveTargetId, setMoveTargetId] = useState('');
+  const [isMoving, setIsMoving] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [moveSuccess, setMoveSuccess] = useState(false);
 
   // Create school form state
   const [createName, setCreateName] = useState('');
@@ -80,6 +94,21 @@ export default function SchoolsPage({
 
   const selectedSchool = schools.find(s => s.id === selectedSchoolId) ?? null;
   const pendingCount = pendingInvites.filter(i => i.status === 'pending').length;
+  const schoolToDelete = schools.find(s => s.id === deleteConfirmId) ?? null;
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteConfirmId || !schoolToDelete) return;
+    if (deleteConfirmName !== schoolToDelete.name) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteSchool(deleteConfirmId);
+      setDeleteConfirmId(null);
+      setDeleteConfirmName('');
+      if (selectedSchoolId === deleteConfirmId) setSelectedSchoolId(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -328,6 +357,17 @@ export default function SchoolsPage({
                           Tu escuela
                         </span>
                       )}
+                      {/* Super admin: botón eliminar escuela */}
+                      {isSuperAdmin && !isOwn && (
+                        <button
+                          onClick={() => { setDeleteConfirmId(school.id!); setDeleteConfirmName(''); }}
+                          className="flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-600 hover:bg-red-600 hover:text-white text-[10px] font-bold rounded-full transition-colors"
+                          title="Eliminar escuela"
+                        >
+                          <Trash2 className="w-2.5 h-2.5" />
+                          Eliminar
+                        </button>
+                      )}
                     </div>
 
                     <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center mb-3">
@@ -379,6 +419,7 @@ export default function SchoolsPage({
                           </button>
                         ) : null
                       )}
+
                     </div>
                   </motion.div>
                 );
@@ -542,6 +583,122 @@ export default function SchoolsPage({
                 </div>
               </div>
             )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── Mover usuario de escuela (solo super admin) ─────────────────────── */}
+      {isSuperAdmin && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+          <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+            <Users className="w-4 h-4 text-indigo-500" />
+            Mover Usuario a otra Escuela
+          </h3>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="email"
+              value={moveEmail}
+              onChange={e => { setMoveEmail(e.target.value); setMoveError(null); setMoveSuccess(false); }}
+              placeholder="correo@ejemplo.com"
+              className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <select
+              value={moveTargetId}
+              onChange={e => setMoveTargetId(e.target.value)}
+              className="w-full sm:w-56 px-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">— Seleccionar escuela —</option>
+              {schools.map(s => (
+                <option key={s.id} value={s.id!}>{s.name}</option>
+              ))}
+            </select>
+            <button
+              disabled={!moveEmail.trim() || !moveTargetId || isMoving}
+              onClick={async () => {
+                setIsMoving(true); setMoveError(null); setMoveSuccess(false);
+                const err = await onMoveUser(moveEmail.trim(), moveTargetId);
+                setIsMoving(false);
+                if (err) { setMoveError(err); } else { setMoveSuccess(true); setMoveEmail(''); setMoveTargetId(''); }
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              {isMoving
+                ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : <Shield className="w-4 h-4" />}
+              Mover Usuario
+            </button>
+          </div>
+          {moveError   && <p className="text-xs text-red-600 font-semibold">{moveError}</p>}
+          {moveSuccess && <p className="text-xs text-emerald-600 font-semibold">Usuario movido correctamente.</p>}
+        </div>
+      )}
+
+      {/* ─── Delete confirmation modal ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {deleteConfirmId && schoolToDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            onClick={e => { if (e.target === e.currentTarget) { setDeleteConfirmId(null); setDeleteConfirmName(''); } }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900">Eliminar escuela</h3>
+                  <p className="text-xs text-gray-400">Esta acción no se puede deshacer</p>
+                </div>
+              </div>
+
+              <div className="bg-red-50 rounded-xl border border-red-100 px-4 py-3 text-xs text-red-700 leading-relaxed">
+                Se eliminarán <strong>todos los alumnos, maestros, materias, pagos, asistencias y demás datos</strong> de <strong>{schoolToDelete.name}</strong>. Los usuarios serán desvinculados de la escuela.
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  Escribe el nombre exacto de la escuela para confirmar:
+                </label>
+                <p className="text-xs font-mono bg-gray-100 rounded-lg px-3 py-1.5 text-gray-700 mb-2 select-all">{schoolToDelete.name}</p>
+                <input
+                  type="text"
+                  value={deleteConfirmName}
+                  onChange={e => setDeleteConfirmName(e.target.value)}
+                  placeholder="Nombre de la escuela"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-3 justify-end pt-1">
+                <button
+                  onClick={() => { setDeleteConfirmId(null); setDeleteConfirmName(''); }}
+                  className="px-4 py-2 text-sm font-semibold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  disabled={deleteConfirmName !== schoolToDelete.name || isDeleting}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-xl hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {isDeleting ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  Eliminar escuela
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

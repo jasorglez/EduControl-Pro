@@ -319,6 +319,9 @@ export default function App() {
   const [settingsInviteEmail, setSettingsInviteEmail] = useState('');
   const [settingsInviteRole, setSettingsInviteRole] = useState<'admin' | 'staff' | 'teacher'>('teacher');
   const [isInvitingFromSettings, setIsInvitingFromSettings] = useState(false);
+  const [settingsDeleteId, setSettingsDeleteId] = useState<string | null>(null);
+  const [settingsDeleteName, setSettingsDeleteName] = useState('');
+  const [isDeletingSchool, setIsDeletingSchool] = useState(false);
 
   type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
   type SlotEntry = { start: string; end: string; subjectId: string };
@@ -2331,7 +2334,7 @@ export default function App() {
 
   const handlePreRegisterUser = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!schoolId) return;
+    if (!activeSchoolId) return;
     const formData = new FormData(e.currentTarget);
     const email = (formData.get('email') as string).trim().toLowerCase();
     const role  = formData.get('role') as 'admin' | 'staff' | 'teacher';
@@ -2342,7 +2345,7 @@ export default function App() {
       const existingSnap = await getDocs(query(
         collection(db, 'users'),
         where('email', '==', email),
-        where('schoolId', '==', schoolId)
+        where('schoolId', '==', activeSchoolId)
       ));
       if (!existingSnap.empty) {
         setNotification({ message: 'Este usuario ya pertenece a tu escuela.', type: 'info' });
@@ -2352,7 +2355,7 @@ export default function App() {
       const dupSnap = await getDocs(query(
         collection(db, 'school_invites'),
         where('email', '==', email),
-        where('schoolId', '==', schoolId),
+        where('schoolId', '==', activeSchoolId),
         where('status', '==', 'pending')
       ));
       if (!dupSnap.empty) {
@@ -2360,7 +2363,7 @@ export default function App() {
         return;
       }
       await addDoc(collection(db, 'school_invites'), {
-        email, role, schoolId, status: 'pending', createdAt: serverTimestamp(),
+        email, role, schoolId: activeSchoolId, status: 'pending', createdAt: serverTimestamp(),
       });
 
       // Send real email invitation
@@ -2422,6 +2425,71 @@ export default function App() {
   // null = volver a la propia escuela; string = ver datos de otra empresa.
   const handleSwitchSchool = (id: string | null) => {
     setViewingSchoolId(id === schoolId ? null : id);
+  };
+
+  // ─── Delete school with all its data (solo super admin) ─────────────────────
+  const handleDeleteSchool = async (targetSchoolId: string): Promise<void> => {
+    const SUBCOLS = [
+      'students', 'teachers', 'subjects', 'classrooms', 'majors',
+      'payments', 'expenses', 'attendance', 'grades',
+      'schedule_scenarios', 'schedule_entries', 'academic_groups',
+      'task_assignments', 'task_submissions', 'tasks',
+    ];
+    const BATCH_SIZE = 490;
+
+    const deleteBatch = async (refs: any[]) => {
+      for (let i = 0; i < refs.length; i += BATCH_SIZE) {
+        const b = writeBatch(db);
+        refs.slice(i, i + BATCH_SIZE).forEach((r: any) => b.delete(r));
+        await b.commit();
+      }
+    };
+
+    // Delete all subcollection documents
+    for (const col of SUBCOLS) {
+      const snap = await getDocs(collection(db, 'schools', targetSchoolId, col));
+      if (!snap.empty) await deleteBatch(snap.docs.map(d => d.ref));
+    }
+
+    // Delete pending invites for this school
+    const invSnap = await getDocs(query(collection(db, 'school_invites'), where('schoolId', '==', targetSchoolId)));
+    if (!invSnap.empty) await deleteBatch(invSnap.docs.map(d => d.ref));
+
+    // Detach users from this school (clear schoolId so they see setup screen)
+    const usersSnap = await getDocs(query(collection(db, 'users'), where('schoolId', '==', targetSchoolId)));
+    if (!usersSnap.empty) {
+      for (let i = 0; i < usersSnap.docs.length; i += BATCH_SIZE) {
+        const b = writeBatch(db);
+        usersSnap.docs.slice(i, i + BATCH_SIZE).forEach(d => b.update(d.ref, { schoolId: '' }));
+        await b.commit();
+      }
+    }
+
+    // Delete the school document itself
+    await deleteDoc(doc(db, 'schools', targetSchoolId));
+
+    // If we were viewing this school, return to our own
+    if (viewingSchoolId === targetSchoolId) setViewingSchoolId(null);
+
+    setNotification({ message: 'Escuela eliminada correctamente.', type: 'success' });
+  };
+
+  // ─── Move user to a different school (solo super admin) ──────────────────────
+  const handleMoveUserToSchool = async (email: string, targetSchoolId: string): Promise<string | null> => {
+    const normalized = email.trim().toLowerCase();
+    const snap = await getDocs(query(collection(db, 'users'), where('email', '==', normalized)));
+    if (snap.empty) return 'No se encontró ningún usuario con ese correo.';
+    const userDoc = snap.docs[0];
+    await updateDoc(userDoc.ref, { schoolId: targetSchoolId });
+    // Accept any pending invites for this user in that school
+    const invSnap = await getDocs(query(
+      collection(db, 'school_invites'),
+      where('email', '==', normalized),
+      where('schoolId', '==', targetSchoolId),
+      where('status', '==', 'pending')
+    ));
+    for (const inv of invSnap.docs) await updateDoc(inv.ref, { status: 'accepted' });
+    return null;
   };
 
   // ─── Create new school ──────────────────────────────────────────────────────
@@ -2526,6 +2594,9 @@ export default function App() {
             ...(userProfile?.role === 'admin' || user?.email === 'jsorglez@gmail.com' ? [
               { tab: 'users',    icon: UserPlus,        label: 'Usuarios'      },
               { tab: 'settings', icon: Building2,       label: 'Admon Escuelas'},
+            ] : []),
+            ...(user?.email === 'jsorglez@gmail.com' ? [
+              { tab: 'schools',  icon: Crown,           label: 'Escuelas'      },
             ] : []),
           ] as { tab: typeof activeTab; icon: any; label: string }[]).map(({ tab, icon: Icon, label }) => (
             <button
@@ -3161,6 +3232,7 @@ export default function App() {
               onOpenNewUser={() => setIsUserModalOpen(true)}
               onUpdateRole={handleUpdateUserRole}
               onSetBotPin={handleSetBotPin}
+              onSendPasswordReset={handlePasswordReset}
             />
           )}
 
@@ -3179,6 +3251,8 @@ export default function App() {
               onRevokeInvite={handleRevokeInvite}
               onUpdateRole={handleUpdateUserRole}
               onSwitchSchool={handleSwitchSchool}
+              onDeleteSchool={handleDeleteSchool}
+              onMoveUser={handleMoveUserToSchool}
             />
           )}
 
@@ -3331,10 +3405,11 @@ export default function App() {
                     {allSchools.map(s => {
                       const isCurrent = s.id === activeSchoolId;
                       const isOwn     = s.id === schoolId;
+                      const isSuperAdmin = user?.email === 'jsorglez@gmail.com';
                       return (
                         <div
                           key={s.id}
-                          onClick={() => user?.email === 'jsorglez@gmail.com' && handleSwitchSchool(s.id!)}
+                          onClick={() => isSuperAdmin && handleSwitchSchool(s.id!)}
                           className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
                             isCurrent
                               ? 'border-indigo-300 bg-indigo-50'
@@ -3364,6 +3439,16 @@ export default function App() {
                               </button>
                             </div>
                           </div>
+                          {/* Botón eliminar (solo super admin, solo escuelas ajenas) */}
+                          {isSuperAdmin && !isOwn && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setSettingsDeleteId(s.id!); setSettingsDeleteName(''); }}
+                              title="Eliminar escuela"
+                              className="shrink-0 p-2 rounded-xl bg-red-50 text-red-500 hover:bg-red-600 hover:text-white transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       );
                     })}
@@ -3392,7 +3477,7 @@ export default function App() {
 
                 <div className="lg:col-span-2">
                   <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100">
-                    <form onSubmit={handleSaveSchoolConfig} className="space-y-6">
+                    <form key={schoolConfig?.id ?? ''} onSubmit={handleSaveSchoolConfig} className="space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-gray-500 uppercase">Nombre de la Escuela</label>
@@ -3422,6 +3507,69 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {/* ── Modal eliminar escuela (solo super admin) ── */}
+              {settingsDeleteId && (() => {
+                const target = allSchools.find(s => s.id === settingsDeleteId);
+                if (!target) return null;
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+                    onClick={e => { if (e.target === e.currentTarget) { setSettingsDeleteId(null); setSettingsDeleteName(''); } }}
+                  >
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                          <Trash2 className="w-5 h-5 text-red-600" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-gray-900">Eliminar escuela</h3>
+                          <p className="text-xs text-gray-400">Esta acción no se puede deshacer</p>
+                        </div>
+                      </div>
+                      <div className="bg-red-50 rounded-xl border border-red-100 px-4 py-3 text-xs text-red-700 leading-relaxed">
+                        Se eliminarán <strong>todos los alumnos, maestros, materias, pagos, asistencias y demás datos</strong> de <strong>{target.name}</strong>. Los usuarios serán desvinculados.
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-600 mb-1.5">Escribe el nombre exacto para confirmar:</label>
+                        <p className="text-xs font-mono bg-gray-100 rounded-lg px-3 py-1.5 text-gray-700 mb-2 select-all">{target.name}</p>
+                        <input
+                          type="text"
+                          value={settingsDeleteName}
+                          onChange={e => setSettingsDeleteName(e.target.value)}
+                          placeholder="Nombre de la escuela"
+                          autoFocus
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                        />
+                      </div>
+                      <div className="flex gap-3 justify-end pt-1">
+                        <button
+                          onClick={() => { setSettingsDeleteId(null); setSettingsDeleteName(''); }}
+                          className="px-4 py-2 text-sm font-semibold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          disabled={settingsDeleteName !== target.name || isDeletingSchool}
+                          onClick={async () => {
+                            setIsDeletingSchool(true);
+                            try {
+                              await handleDeleteSchool(settingsDeleteId);
+                              setSettingsDeleteId(null);
+                              setSettingsDeleteName('');
+                            } finally { setIsDeletingSchool(false); }
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-xl hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {isDeletingSchool
+                            ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            : <Trash2 className="w-4 h-4" />}
+                          Eliminar escuela
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </motion.div>
           )}
 

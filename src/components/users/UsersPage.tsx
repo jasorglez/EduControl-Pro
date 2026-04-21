@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { createColumnHelper } from '@tanstack/react-table';
 import { motion } from 'motion/react';
-import { UserPlus, Search, X, Shield, Users, KeyRound, RefreshCw, Eye, EyeOff, Copy } from 'lucide-react';
+import { UserPlus, Search, X, Shield, Users, KeyRound, RefreshCw, Eye, EyeOff, Copy, Mail, Check } from 'lucide-react';
 import DataTable from '../ui/DataTable';
 import type { UserProfile } from '../../types';
 
@@ -11,6 +11,7 @@ interface UsersPageProps {
   onOpenNewUser: () => void;
   onUpdateRole: (uid: string, role: 'admin' | 'staff' | 'teacher') => void;
   onSetBotPin: (uid: string, pin: string) => Promise<void>;
+  onSendPasswordReset: (email: string) => Promise<string | null>;
 }
 
 const col = createColumnHelper<UserProfile>();
@@ -84,8 +85,35 @@ function PinCell({ user, onSetBotPin }: { user: UserProfile; onSetBotPin: (uid: 
   );
 }
 
+function ResetCell({ email, onSendPasswordReset }: { email: string; onSendPasswordReset: (email: string) => Promise<string | null> }) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent]       = useState(false);
+  const [err, setErr]         = useState<string | null>(null);
+
+  const handle = async () => {
+    setSending(true); setErr(null);
+    const e = await onSendPasswordReset(email);
+    setSending(false);
+    if (e) { setErr(e); } else { setSent(true); setTimeout(() => setSent(false), 3000); }
+  };
+
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <button
+        onClick={handle}
+        disabled={sending}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 text-sky-600 border border-sky-200 rounded-xl text-xs font-bold hover:bg-sky-100 transition-all disabled:opacity-50"
+      >
+        {sending ? <RefreshCw className="w-3 h-3 animate-spin" /> : sent ? <Check className="w-3 h-3 text-emerald-500" /> : <Mail className="w-3 h-3" />}
+        {sent ? '¡Enviado!' : 'Enviar contraseña'}
+      </button>
+      {err && <span className="text-[10px] text-red-500">{err}</span>}
+    </div>
+  );
+}
+
 export default function UsersPage({
-  usersList, currentUserEmail, onOpenNewUser, onUpdateRole, onSetBotPin,
+  usersList, currentUserEmail, onOpenNewUser, onUpdateRole, onSetBotPin, onSendPasswordReset,
 }: UsersPageProps) {
   const [globalFilter, setGlobalFilter] = useState('');
 
@@ -148,7 +176,16 @@ export default function UsersPage({
         <PinCell user={row.original} onSetBotPin={onSetBotPin} />
       ),
     }),
-  ], [currentUserEmail, onUpdateRole, onSetBotPin]);
+
+    col.display({
+      id: 'password_reset',
+      header: 'Contraseña',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <ResetCell email={row.original.email} onSendPasswordReset={onSendPasswordReset} />
+      ),
+    }),
+  ], [currentUserEmail, onUpdateRole, onSetBotPin, onSendPasswordReset]);
 
   return (
     <motion.div key="users" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }} className="space-y-5">
